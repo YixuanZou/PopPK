@@ -605,7 +605,7 @@ def omega_nonzero(list_file):
         for line in target:
             if line.startswith('$SIGMA'):
                 in_omega = False
-            if in_omega and 'FIXED' not in line and line[0].isdigit():
+            if in_omega and 'FIXED' not in line:
                 omega_list.append(count)
             if in_omega:
                 count += 1
