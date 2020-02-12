@@ -452,29 +452,29 @@ def full_model(base_script, script, data, covariates, IMPMAP=False):
     # copy base_script to script
     shutil.copy(base_script, script)
 
-    output_lines = []
-    with open(base_script, 'r') as target:
-        for line in target:
-            if line.startswith('$ERROR'):
-                if IMPMAP:
-                    for i in range(1, num_omega+1):
-                        output_lines.append('MU_%d=LOG(TV%s)\n' %
-                                            (i, tvs[i-1]))
-
-            if line.startswith('$ESTIMATION'):
-                line1 = '$ESTIMATION METHOD=1 INTERACTION' + \
-                    ' MAXEVAL=9999 PRINT=10 NOABORT\n'
-                output_lines.append(line1)
-                if IMPMAP:
-                    line2 = '$ESTIMATION METHOD=IMPMAP INTERACTION' +\
-                        ' EONLY=1 ISAMPLE=10000 NITER=5 SEED=12345 PRINT=1\n'
-                    output_lines.append(line2)
-                continue
-            output_lines.append(line)
-
-    with open(script, 'w') as target:
-        for line in output_lines:
-            target.write(line)
+    # output_lines = []
+    # with open(base_script, 'r') as target:
+    #     for line in target:
+    #         if line.startswith('$ERROR'):
+    #             if IMPMAP:
+    #                 for i in range(1, num_omega+1):
+    #                     output_lines.append('MU_%d=LOG(TV%s)\n' %
+    #                                         (i, tvs[i-1]))
+    #
+    #         if line.startswith('$ESTIMATION'):
+    #             line1 = '$ESTIMATION METHOD=1 INTERACTION' + \
+    #                 ' MAXEVAL=9999 PRINT=10 NOABORT\n'
+    #             output_lines.append(line1)
+    #             if IMPMAP:
+    #                 line2 = '$ESTIMATION METHOD=IMPMAP INTERACTION' +\
+    #                     ' EONLY=1 ISAMPLE=10000 NITER=5 SEED=12345 PRINT=1\n'
+    #                 output_lines.append(line2)
+    #             continue
+    #         output_lines.append(line)
+    #
+    # with open(script, 'w') as target:
+    #     for line in output_lines:
+    #         target.write(line)
 
     # extract the individual demographic information
     demo_df = data.groupby('CID').first()
