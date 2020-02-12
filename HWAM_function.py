@@ -20,7 +20,7 @@ from math import log10, floor
 
 def bw_wald(thetas, cov, script, base_script, nobs,
             insert_variables, cwdir, covariates, data,
-            quantile, quantile1, options='', version=73):
+            quantile, quantile1, options='', version=73, bw_nm=True):
     """Main function for HWAM.
     thetas is the thetas vector from full model
     cov is the covariance matrix from full model
@@ -35,6 +35,7 @@ def bw_wald(thetas, cov, script, base_script, nobs,
     quantile1 is the significance level for BE using NONMEM
     options is the option used for NONMEM run in the conmmand line1
     version is the NONMEM version used
+    bw_nm is true means we need to run second confirmation in NONMEM
     """
     base_theta_num = count_theta(base_script)
     theta_num = count_theta(script)
@@ -77,13 +78,15 @@ def bw_wald(thetas, cov, script, base_script, nobs,
     best_set = temp_final_select_list[:]
     update_list = [x+base_theta_num+1 for x in best_set]
     print 'Best set is ', update_list
-    _, _, back_select_list = covariate_model_bw(base_script, base_theta_num,
-                                                cwdir, data, nobs,
-                                                covariates,
-                                                quantile,
-                                                select_list=update_list,
-                                                options=options,
-                                                version=73)
+    back_select_list = update_list
+    if bw_nm:
+        _, _, back_select_list = covariate_model_bw(base_script, base_theta_num,
+                                                    cwdir, data, nobs,
+                                                    covariates,
+                                                    quantile,
+                                                    select_list=update_list,
+                                                    options=options,
+                                                    version=73)
     return bw_list, back_select_list
 
 def covariate_model_bw(script, base_theta_num,
