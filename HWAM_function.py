@@ -79,6 +79,8 @@ def bw_wald(thetas, cov, script, base_script, nobs,
     update_list = [x+base_theta_num+1 for x in best_set]
     print 'Best set is ', update_list
     back_select_list = update_list
+    with open('wam_interim_result.txt', 'r') as target:
+        target.write(str(update_list))
     if bw_nm:
         _, _, back_select_list = covariate_model_bw(base_script, base_theta_num,
                                                     cwdir, data, nobs,
