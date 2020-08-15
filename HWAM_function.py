@@ -94,7 +94,7 @@ def bw_wald(thetas, cov, script, base_script, nobs,
 def covariate_model_bw(script, base_theta_num,
                        cwdir, data, nobs, covariates,
                        quantile, select_list=[], options='',
-                       version=73):
+                       version=74):
     """Backward method in PK-PD. Do backward elimination.
 
     script is the NONMEM script without any covariates
@@ -186,6 +186,12 @@ def covariate_model_bw(script, base_theta_num,
         best_result_file = temp_best_result_file
         obj = read_obj(best_result_file)
         select = [x for x in select if x != select[worst_index]]
+
+        if len(select) == 0:
+            best_script = base_script
+            best_result_file = base_script.replace(".ctl", ".ext")
+            print 'The best model is the base model.'
+            break
 
         model_update_initial(best_script, best_result_file, base_theta_num)
         step += 1

@@ -17,7 +17,7 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 from math import log10, floor
-
+from random import sample
 
 def num_obs(data):
     """Find how many patients in the data."""
@@ -56,7 +56,7 @@ def select_structural_model(cwdir, data_path, nobs, variable_name,
             shutil.copy(control_file_i, 'crash_'+control_file_i)
             break
 
-        converge, cv_error, min_omega, _ = model_converge(result_file_i, i)
+        converge, cv_error, min_omega, _ = model_converge(result_file_i)
         if i > 1:
             old_result_file = result_file % (i - 1)
             old_control_file = control_file % (i - 1)
@@ -159,7 +159,7 @@ def check_sigma(best_script, best_result, quantile, ncomp):
     current_result = 'model_err%d.ext' % index
     current_script = 'model_err%d.ctl' % index
     if model_compare(current_result, best_result, quantile, 1):
-        converge, _, _, _ = model_converge(result_file_list[index], ncomp)
+        converge, _, _, _ = model_converge(result_file_list[index])
         if converge:
             shutil.copy(current_script, best_script)
 
@@ -186,7 +186,7 @@ def base_report(best, ss_list, cwdir, nobs, quantile, ncomp):
             aic = obj + 2*npar
             bic = obj + npar*math.log(nobs)
             minimize = min_status(xml_file)
-            converge, _, _, _ = model_converge(result_file_i, ncomp)
+            converge, _, _, _ = model_converge(result_file_i)
             select = (i == best)
             ss = ss_list[i-1]
             obs = []
@@ -226,7 +226,7 @@ def count_fixed(script):
 
 
 def run_model(control_file, result_path_file,
-              options='', version=73, nobuild=False,
+              options='', version=74, nobuild=False,
               intel=False):
     """Run the model in the shell."""
     if not nobuild:
@@ -239,15 +239,15 @@ def run_model(control_file, result_path_file,
         redirect = redirect +\
             r'\windows\bin\ipsxe-comp-vars.bat" intel64 vs2017'
         batch_file = 'run_nonmem.bat'
-        with open(batch_file, 'w') as target:
-            target.write(redirect)
-            target.write('\n')
-            target.write(cmd_script)
         try:
             if intel:
+                with open(batch_file, 'w') as target:
+                    target.write(redirect)
+                    target.write('\n')
+                    target.write(cmd_script)
                 subprocess.call(batch_file)
             else:
-                subprocess.call(cmd_script)
+                subprocess.call(cmd_script, shell=True)
         except Exception:
             print 'There is an error in your script.'
     else:
@@ -261,15 +261,15 @@ def run_model(control_file, result_path_file,
         redirect = redirect +\
             r'\windows\bin\ipsxe-comp-vars.bat" intel64 vs2017'
         batch_file = 'run_nonmem.bat'
-        with open(batch_file, 'w') as target:
-            target.write(redirect)
-            target.write('\n')
-            target.write(cmd_script)
         try:
             if intel:
+                with open(batch_file, 'w') as target:
+                    target.write(redirect)
+                    target.write('\n')
+                    target.write(cmd_script)
                 subprocess.call(batch_file)
             else:
-                subprocess.call(cmd_script)
+                subprocess.call(cmd_script, shell=True)
         except Exception:
             print 'There is an error in your script.'
 
@@ -355,92 +355,29 @@ def mcmc_model_update(script, sample_size):
             target.writelines(line)
 
 
-def model_update_initial(script, old_result_file, ncomp):
+def model_update_initial(script, old_result_file, base_theta_num, nsig=4):
     """Update the model by using the estimates from previous model."""
     old_out = read_result_file(old_result_file)
     estimates = old_out[old_out.ITERATION == -1000000000].iloc[:, 1:-1]
 
     thetas = collections.OrderedDict()
-    omegas = collections.OrderedDict()
-    sigmas = collections.OrderedDict()
+
     for name in estimates:
         if 'THETA' in name:
             thetas[name] = estimates.loc[:, name].values[0]
-        elif 'OMEGA' in name:
-            omegas[name] = estimates.loc[:, name].values[0]
-            # omegas[name] = 0.1
-        elif 'SIGMA' in name:
-            sigmas[name] = estimates.loc[:, name].values[0]
     # pull out the estimates from the data
 
-    theta_num_old = len(thetas)
-    omega_num_old = len(thetas)
-    sigma_num_old = 2
-    theta_diagonal = thetas.values()
-    omega_diagonal, sigma_diagonal = [], []
-    for name in omegas:
-        for i in range(1, omega_num_old+1):
-            if 'OMEGA(%d,%d)' % (i, i) in name:
-                omega_diagonal.append(omegas[name])
-    for name in sigmas:
-        for i in range(1, sigma_num_old+1):
-            if 'SIGMA(%d,%d)' % (i, i) in name:
-                sigma_diagonal.append(sigmas[name])
+    theta_num = len(thetas)
+    theta_value = thetas.values()
 
-    initial_new_model(script, theta_diagonal, 'THETA',
-                      theta_num_old, '(1E-10, %.8f)\n',
-                      '(-10, %.8f, 10)\n', ncomp)
-    print 'THETAs from this model are:', theta_diagonal
-    # initial_new_model(script, sigma_diagonal, 'SIGMA', sigma_num_old)
-    # print 'SIGMAs from this model are:', sigma_diagonal
-    # initial_new_model(script, omega_diagonal, 'OMEGA', omega_num_old)
-    # print 'OMEGAs from this model are:', omega_diagonal
-
-
-def model_update_initial_gnr(script, old_result_file, ncomp, nsig=4):
-    """Update the model by using the estimates from previous model."""
-    old_out = read_result_file(old_result_file)
-    estimates = old_out[old_out.ITERATION == -1000000000].iloc[:, 1:-1]
-
-    thetas = collections.OrderedDict()
-    omegas = collections.OrderedDict()
-    sigmas = collections.OrderedDict()
-    for name in estimates:
-        if 'THETA' in name:
-            thetas[name] = estimates.loc[:, name].values[0]
-        elif 'OMEGA' in name:
-            omegas[name] = estimates.loc[:, name].values[0]
-        elif 'SIGMA' in name:
-            sigmas[name] = estimates.loc[:, name].values[0]
-    # pull out the estimates from the data
-
-    theta_num_old = len(thetas)
-    omega_num_old = 4
-    sigma_num_old = 1
-    theta_diagonal = thetas.values()
-    omega_diagonal, sigma_diagonal = [], []
-    for name in omegas:
-        for i in range(1, omega_num_old+1):
-            if 'OMEGA(%d,%d)' % (i, i) in name:
-                omega_diagonal.append(omegas[name])
-    for name in sigmas:
-        for i in range(1, sigma_num_old+1):
-            if 'SIGMA(%d,%d)' % (i, i) in name:
-                sigma_diagonal.append(sigmas[name])
-
-    initial_new_model(script, theta_diagonal, 'THETA',
-                      theta_num_old, '(1E-10, %.%df)\n' % nsig,
-                      '(-10, %.%df, 10)\n' % nsig, ncomp)
-    print 'THETAs from this model are:', theta_diagonal
-    # initial_new_model(script, sigma_diagonal, 'SIGMA', sigma_num_old)
-    # print 'SIGMAs from this model are:', sigma_diagonal
-    # initial_new_model(script, omega_diagonal, 'OMEGA', omega_num_old)
-    # print 'OMEGAs from this model are:', omega_diagonal
+    initial_new_model(script, theta_value, 'THETA',
+                      theta_num, '(1E-10, %.{0}f)\n'.format(nsig),
+                      '(-10, %.{0}f, 10)\n'.format(nsig), base_theta_num)
 
 
 def initial_new_model(script, values, parameter,
-                      num_old, pattern1='%.8f\n',
-                      pattern2='%.8f\n', ncomp=None):
+                      theta_num, pattern1='%.8f\n',
+                      pattern2='%.8f\n', base_theta_num=0):
     """Insert old values into the new model."""
     output_lines = []
     in_para = False
@@ -451,8 +388,8 @@ def initial_new_model(script, values, parameter,
                 in_para = False
             if in_para:
                 if parameter == 'THETA':
-                    if num in range(0, num_old):
-                        if num <= (2*ncomp - 1):
+                    if num in range(0, theta_num):
+                        if num <= (base_theta_num- 1):
                             if values[num] == 0:
                                 output_lines.append('0 FIXED \n')
                             elif values[num] == 1:
@@ -471,7 +408,7 @@ def initial_new_model(script, values, parameter,
                     num += 1
                     continue
                 else:
-                    if num in range(0, num_old):
+                    if num in range(0, theta_num):
                         if values[num] == 0:
                             output_lines.append('0 FIXED \n')
                         elif values[num] == 1:
@@ -592,7 +529,7 @@ def structural_model(i, variable_name, data_path, the_input):
         target.write('FILE=%s.CSV  NOAPPEND NOPRINT' % file_name.upper())
 
 
-def model_converge(result_file, ncomp):
+def model_converge(result_file):
     """Test whether the model converges."""
     cv_error = []
     min_omega = []
@@ -613,7 +550,7 @@ def model_converge(result_file, ncomp):
                     if estimate not in [0, 1]:
                         index = int(re.findall(r'\d+', parameter)[0])
                         if ('OMEGA' in parameter or 'SIGMA' in parameter or
-                           ('THETA' in parameter and index >= ncomp)):
+                           ('THETA' in parameter)):
                             if cv > 0.5 or estimate < 0.0001:
                                 converge = False
                                 cv_error.append(parameter)
@@ -634,7 +571,7 @@ def model_converge(result_file, ncomp):
                         if estimate not in [0, 1]:
                             index = int(re.findall(r'\d+', parameter)[0])
                             if ('OMEGA' in parameter or 'SIGMA' in parameter or
-                               ('THETA' in parameter and index >= ncomp)):
+                               ('THETA' in parameter)):
                                     if cv > 0.5 or estimate < 0.0001:
                                         converge = False
                                         cv_error.append(parameter)
@@ -716,16 +653,11 @@ def count_par(script):
 
 
 def count_theta(script):
-    """Cound how many thetas in the script."""
+    """Count theta for general NONMEM script."""
     theta_num = 0
-    in_theta = False
     with open(script, 'r') as target:
         for line in target:
-            if line.startswith('CLP'):
-                in_theta = True
-            if in_theta and line.startswith('CL='):
-                in_theta = False
-            if in_theta and 'THETA' in line:
+            if 'THETA(' in line:
                 theta_num += 1
     return theta_num
 
@@ -756,14 +688,13 @@ def omega_nonzero(list_file):
         for line in target:
             if line.startswith('$SIGMA'):
                 in_omega = False
-            if in_omega and 'FIXED' not in line:
+            if in_omega and 'FIXED' not in line and line[0].isdigit():
                 omega_list.append(count)
             if in_omega:
                 count += 1
             if line.startswith('$OMEGA'):
                 in_omega = True
     return omega_list
-
 
 def best_model_covariate(result_file_list):
     """Select the best model when adding one covariate.
@@ -830,28 +761,29 @@ def truncate_cov(covariates):
 def add_num_covariate(index, insert_variables,
                       median, best_script, new_script):
     """Add numerical covariate to the best structural model."""
-    pk_parameter = insert_variables[index][0]
+    tv = insert_variables[index][0]
     insert_variable = insert_variables[index][2]
     covariate = insert_variables[index][3]
-    in_theta = False
     theta_num = 0
+    with open(best_script, 'r') as script:
+        for line in script:
+            if 'THETA(' in line:
+                theta_num += 1
+
+    # add continuous covariates
     output_lines = []
     with open(best_script, 'r') as script:
         for line in script:
-            if line.startswith('CLP'):
-                in_theta = True
-            if in_theta and line.startswith('CL='):
-                in_theta = False
-            if in_theta and 'THETA' in line:
-                theta_num += 1
-            if line.startswith('CLT='):
+            if line.startswith('$PRED') or  line.startswith('$PK'):
+                output_lines.append(line)
                 output_lines.append('%s=(%s/%.8f)**THETA(%d)\n' %
                                     (insert_variable,
                                      covariate,
                                      median,
                                      theta_num+1))
-            if line.startswith(pk_parameter + 'T='):
-                output_lines.append(line.strip('\n') +
+                continue
+            if line.startswith('TV' + tv + '='):
+                output_lines.append(line.rstrip() +
                                     '*%s\n' % insert_variable)
                 continue
             if line.startswith('$OMEGA'):
@@ -866,28 +798,30 @@ def add_num_covariate(index, insert_variables,
 def add_factor_covariate(index, insert_variables,
                          level, best_script, new_script):
     """Add factor covariate to the best structural model."""
-    pk_parameter = insert_variables[index][0]
+    tv = insert_variables[index][0]
     insert_variable = insert_variables[index][2]
     covariate = insert_variables[index][3]
-    in_theta = False
     theta_num = 0
+    # count theta number
+    with open(best_script, 'r') as script:
+        for line in script:
+            if 'THETA(' in line:
+                theta_num += 1
+
+    # add factor covariates
     output_lines = []
     with open(best_script, 'r') as script:
         for line in script:
-            if line.startswith('CLP'):
-                in_theta = True
-            if in_theta and line.startswith('CL='):
-                in_theta = False
-            if in_theta and 'THETA' in line:
-                theta_num += 1
-            if line.startswith('CLT='):
+            if line.startswith('$PRED') or  line.startswith('$PK'):
+                output_lines.append(line)
                 output_lines.append('%s=1\n' % insert_variable)
                 for j in range(1, level):
                     output_lines.append('IF(%s==%d) %s=EXP(THETA(%d))\n' %
                                         (covariate, j,
                                          insert_variable, theta_num+j))
-            if line.startswith(pk_parameter + 'T='):
-                output_lines.append(line.strip('\n') +
+                continue
+            if line.startswith('TV' + tv + '='):
+                output_lines.append(line.rstrip() +
                                     '*%s\n' % insert_variable)
                 continue
             if line.startswith('$OMEGA'):
@@ -923,40 +857,55 @@ def move_files(source, pattern, dest):
             shutil.move(the_file, dest)
 
 
-def full_model(base_script, script, ncomp, data, covariates,
-               IMPMAP=True, pk_parameters_all=[]):
-    """Generate the full covariate model from base model."""
+def full_model(base_script, script, data, covariates, IMPMAP=False):
+    """Construct the full model for WAM on a generalized base."""
+    # create related files for full model script
     result_path = script.replace('ctl', 'out')
     result_file = script.replace('ctl', 'ext')
     cov_file = script.replace('ctl', 'cov')
-    if len(pk_parameters_all) > 0:
-        pk_parameters = pk_parameters_all
-    else:
-        pk_parameters_all = pk_para(ncomp)
-        pk_parameters =\
-            [pk_parameters_all[i] for i in omega_nonzero(base_script)]
 
+    # find all the parameter with non fixed omega in the model
+    tvs_all = []
+    with open(base_script, 'r') as target:
+        for line in target:
+            if line.startswith('TV'):
+                tvs_all.append(line.split('=')[0].replace('TV', ''))
+    tvs = [tvs_all[i] for i in omega_nonzero(base_script)]
+
+    # truncate all covariates
     trun_covariates = truncate_cov(covariates)
+
+    # number of omega
+    num_omega = len(tvs)
+
+    # construct a dictionary for the parameter covariate relationship
     insert_variables = dict()
     num = 1
-    for pk_parameter in pk_parameters:
+    for tv in tvs:
         for trun_covariate in trun_covariates:
             insert_variables[num] = \
-                (pk_parameter, trun_covariate,
-                 '%s%s' % (pk_parameter, trun_covariate),
+                (tv, trun_covariate,
+                 '%s%s' % (tv, trun_covariate),
                  trun_covariates[trun_covariate],
                  covariates[trun_covariates[trun_covariate]])
 # pk_parameter, truncated covariate, insert_variable, covariate. variable_type
             num += 1
 
+    # copy base_script to script running IMPMAP
+    shutil.copy(base_script, script)
+
+    # create a template script running foce
+    foce_script = 'foce_script.ctl'
+    shutil.copy(base_script, foce_script)
+
     output_lines = []
     with open(base_script, 'r') as target:
         for line in target:
-            if line.startswith('S1'):
+            if line.startswith('$ERROR'):
                 if IMPMAP:
-                    for i in range(1, 2*ncomp+1):
-                        output_lines.append('MU_%d=LOG(%sT)\n' %
-                                            (i, pk_parameters_all[i-1]))
+                    for i in range(1, num_omega+1):
+                        output_lines.append('MU_%d=LOG(TV%s)\n' %
+                                            (i, tvs[i-1]))
 
             if line.startswith('$ESTIMATION'):
                 line1 = '$ESTIMATION METHOD=1 INTERACTION' + \
@@ -973,18 +922,27 @@ def full_model(base_script, script, ncomp, data, covariates,
         for line in output_lines:
             target.write(line)
 
+    # extract the individual demographic information
+    demo_df = data.groupby('CID').first()
+
+    # add covariate parameter one by one
     for index in range(1, len(insert_variables)+1):
         variable_type = insert_variables[index][4]
         covariate = insert_variables[index][3]
-        pk_parameter = insert_variables[index][0]
+        tv = insert_variables[index][0]
+        print 'add', insert_variables[index][2]
         if variable_type != 'factor':
-            covariate_median = np.median(data[covariate])
+            covariate_median = np.median(demo_df[covariate])
             add_num_covariate(index, insert_variables,
                               covariate_median, script, script)
+            add_num_covariate(index, insert_variables,
+                              covariate_median, foce_script, foce_script)
         else:
-            level = len(data[covariate].unique())
+            level = len(demo_df[covariate].unique())
             add_factor_covariate(index, insert_variables, level,
                                  script, script)
+            add_factor_covariate(index, insert_variables, level,
+                                 foce_script, foce_script)
     return result_path, cov_file, result_file, insert_variables
 
 
@@ -1100,29 +1058,6 @@ def run_full_FOCE(base_script, ncomp, insert_variables,
             return None, None, None, None
 
 
-def run_full_gnr(full_script, full_result_file,
-                 full_cov_file, full_result_path):
-    """Run full covariance model."""
-    run_model(full_script, full_result_path, '-PARAFILE=FPI.PNM')
-    final_result_file = sep_ext_gnr(full_result_file)
-    theta_num = count_theta_gnr(full_script)
-    tv_num = count_tv(full_script) + 2
-    thetas = read_theta_gnr(final_result_file, tv_num, theta_num)
-    cov = read_cov_gnr(full_cov_file, tv_num, theta_num)
-    full_obj = read_obj(final_result_file)
-    return thetas, cov, full_obj
-
-
-def count_theta_gnr(script):
-    """Count theta for general NONMEM script."""
-    theta_num = 0
-    with open(script, 'r') as target:
-        for line in target:
-            if 'THETA(' in line:
-                theta_num += 1
-    return theta_num
-
-
 def count_tv(script):
     """Count typical value for NONMEM script."""
     tv_num = 0
@@ -1133,30 +1068,7 @@ def count_tv(script):
     return tv_num
 
 
-def sep_ext_gnr(result_file):
-    """Seperate extension file for foce and important sampling."""
-    output_lines = []
-    with open(result_file, 'r') as target:
-        table_num = 0
-        for line in target:
-            if line.startswith('TABLE'):
-                table_num += 1
-
-    with open(result_file, 'r') as target:
-        i = 0
-        for line in target:
-            if line.startswith('TABLE'):
-                i += 1
-            if i == table_num:
-                output_lines.append(line)
-    ext = 'final_' + result_file
-    with open(ext, 'w') as target:
-        for line in output_lines:
-            target.write(line)
-    return ext
-
-
-def read_theta_gnr(result_file, tv_num, theta_num):
+def read_theta(result_file, tv_num, theta_num):
     """Read the theta estimates from the result_file."""
     data_frame = read_result_file(result_file)
     estimates = data_frame[data_frame.ITERATION == -1000000000]
@@ -1164,7 +1076,7 @@ def read_theta_gnr(result_file, tv_num, theta_num):
     return thetas.values
 
 
-def read_cov_gnr(cov_file, tv_num, theta_num):
+def read_cov(cov_file, tv_num, theta_num):
     """Read the covariance matrix from .cov file."""
     data_frame = pd.read_csv(cov_file,
                              sep=' ',
@@ -1172,25 +1084,6 @@ def read_cov_gnr(cov_file, tv_num, theta_num):
                              skiprows=1)
     del data_frame['NAME']
     cov = data_frame.iloc[tv_num:theta_num, tv_num:theta_num]
-    return cov.values
-
-
-def read_theta(result_file, ncomp, theta_num):
-    """Read the theta estimates from the result_file."""
-    data_frame = read_result_file(result_file)
-    estimates = data_frame[data_frame.ITERATION == -1000000000]
-    thetas = estimates.iloc[:, (2*ncomp+1):(theta_num+1)]
-    return thetas.values
-
-
-def read_cov(cov_file, ncomp, theta_num):
-    """Read the covariance matrix from .cov file."""
-    data_frame = pd.read_csv(cov_file,
-                             sep=' ',
-                             skipinitialspace=True,
-                             skiprows=1)
-    del data_frame['NAME']
-    cov = data_frame.iloc[2*ncomp:theta_num, 2*ncomp:theta_num]
     return cov.values
 
 
@@ -1225,28 +1118,25 @@ def sbc_wam(thetas, cov, the_set, p, q, n):
 
 def sep_ext(result_file):
     """Seperate extension file for foce and important sampling."""
-    output_lines1 = []
-    output_lines2 = []
+    output_lines = []
     with open(result_file, 'r') as target:
         table_num = 0
         for line in target:
             if line.startswith('TABLE'):
                 table_num += 1
-            if table_num == 1:
-                output_lines1.append(line)
-            else:
-                output_lines2.append(line)
-    ext1 = 'foce_' + result_file
-    with open(ext1, 'w') as target:
-        for line in output_lines1:
-            target.write(line)
 
-    ext2 = 'imp_' + result_file
-    with open(ext2, 'w') as target:
-        for line in output_lines2:
+    with open(result_file, 'r') as target:
+        i = 0
+        for line in target:
+            if line.startswith('TABLE'):
+                i += 1
+            if i == table_num:
+                output_lines.append(line)
+    ext = 'final_' + result_file
+    with open(ext, 'w') as target:
+        for line in output_lines:
             target.write(line)
-
-    return ext1, ext2
+    return ext
 
 
 def modify_foce(script):
@@ -1370,14 +1260,14 @@ def powerset(seq):
     return r
 
 
-def wam(thetas, cov, ncomp, script, mu_script,
+def wam(thetas, cov, base_theta_num, script, full_result_file,
         insert_variables, nobs, num_max=10):
     """Do variable selection by Wald method."""
     theta_num = count_theta(script)
-    p = theta_num + 2*ncomp + 2 - count_fixed(script)
+    p = theta_num + base_theta_num + 2 - count_fixed(script)
     n = nobs
     time0 = time.time()
-    non_select_list = powerset(range(0, theta_num-2*ncomp))
+    non_select_list = powerset(range(0, theta_num-base_theta_num))
     sbc_list = []
     time1 = time.time()
     with open('generate_powerset.txt', 'w') as target:
@@ -1397,10 +1287,9 @@ def wam(thetas, cov, ncomp, script, mu_script,
 
     wam_list = []
     real_sbc_list = []
-    full_result_file = sep_ext(mu_script.replace('ctl', 'ext'))[0]
     full_obj = read_obj(full_result_file)
     for i, the_tuple in enumerate(max_sbc_list):
-        update_list = [x+2*ncomp for x in the_tuple[0]]
+        update_list = [x+base_theta_num for x in the_tuple[0]]
         the_script = 'wald_script%d.ctl' % i
         result_path = 'wald_script%d.out' % i
         result_file = 'wald_script%d.ext' % i
@@ -1427,456 +1316,6 @@ def wam(thetas, cov, ncomp, script, mu_script,
         wam_list[i] += (the_rank,)
 
     return wam_list
-
-
-def covariate_model_fw_seq(script, result_file, ncomp,
-                           cwdir, data, nobs, covariates, quantile):
-    """Sequential forward selection.
-
-    Add covariate to the structural model sequentially, catgorize covariates
-    into different groups and use forward selection seperately.
-    'script' is the script you have for the structural model.
-    'covariates' is the covariates that you may want to include in the model.
-    It returns the best model script and result.
-    """
-    pk_parameters_all = pk_para(ncomp)
-    pk_parameters = [pk_parameters_all[i] for i in omega_nonzero(script)]
-    trun_covariates = truncate_cov(covariates)
-    insert_variables = dict()
-    num = 1
-    for pk_parameter in pk_parameters:
-        for trun_covariate in trun_covariates:
-            if trun_covariate == 'SEX':
-                continue
-            insert_variables[num] = \
-                (pk_parameter, trun_covariate,
-                 '%s%s' % (pk_parameter, trun_covariate),
-                 trun_covariates[trun_covariate],
-                 covariates[trun_covariates[trun_covariate]])
-# pk_parameter, truncated covariate, insert_variable, covariate. variable_type
-            num += 1
-    print 'Adding covariates into structural model.'
-    best_script = script
-    best_result_file = result_file
-    add_covariate_list = []
-    best_covariate_list = []
-    step = 1
-    best_index_list = []
-    ss_list = []
-    num_steps = len(insert_variables)
-    while step <= num_steps:
-        result_file_list = []
-        result_path_list = []
-        script_list = []
-        temp_covariate_list = []
-        print "Step %d begins!" % step
-        for i, index in enumerate(insert_variables.keys()):
-            pk_parameter = insert_variables[index][0]
-            trun_covariate = insert_variables[index][1]
-            insert_variable = insert_variables[index][2]
-            covariate = insert_variables[index][3]
-            variable_type = insert_variables[index][4]
-            temp_covariate_list.append(insert_variable)
-            temp_script = 'model_covariate_%d_%d.ctl' % (step, i)
-            if variable_type != 'factor':
-                covariate_median = np.median(data[covariate])
-                add_num_covariate(index, insert_variables,
-                                  covariate_median, best_script, temp_script)
-            else:
-                level = len(data[covariate].unique())
-                add_factor_covariate(index, insert_variables, level,
-                                     best_script, temp_script)
-            result_path_i = 'model_covariate_%d_%d.out' % (step, i)
-            result_file_i = 'model_covariate_%d_%d.ext' % (step, i)
-            script_list.append(temp_script)
-            result_path_list.append(result_path_i)
-            result_file_list.append(result_file_i)
-            run_model(temp_script, result_path_i)
-            obj = read_obj(result_file_i)
-            if obj == 999999999:
-                print 'Step %d model adding %s %s on %s crashes.' %\
-                    (step, variable_type, covariate, pk_parameter)
-                shutil.copy(temp_script, 'crash_'+temp_script)
-            else:
-                print 'Objective function of step ' + \
-                    '%d model adding %s %s on %s is %.8f' \
-                    % (step, variable_type, covariate, pk_parameter, obj)
-
-        add_covariate_list.append(temp_covariate_list)
-
-        converge = False
-        while result_file_list is not None and converge is False:
-            best_index = best_model_covariate(result_file_list)
-            temp_best_result_file = 'model_covariate_%d_%d.ext' % \
-                                    (step, best_index)
-            temp_best_script = 'model_covariate_%d_%d.ctl' % \
-                (step, best_index)
-            temp_best_result_path = 'model_covariate_%d_%d.out' % \
-                (step, best_index)
-            dof = degree_free(temp_best_script, best_script)
-            ss = model_compare(temp_best_result_file, best_result_file,
-                               quantile, dof)
-            if ss is False:
-                break
-
-            converge, cv_error, _, code =\
-                model_converge(temp_best_result_file, ncomp)
-            if converge:
-                best_script = temp_best_script
-                best_result_file = temp_best_result_file
-                obj = read_obj(best_result_file)
-                print 'For step %d, the best' \
-                    ' objective function is %.8f' % (step, obj)
-            else:
-                if cv_error:
-                    _, name_list = find_index(cv_error)
-                    for index, var_name in name_list:
-                        if 'THETA' in var_name:
-                            print var_name, index+1,\
-                                ': coefficient variation is' +\
-                                ' bigger than 50%, fix it to 0 and run it.'
-                            model_update(temp_best_script, temp_best_script,
-                                         [index],
-                                         pattern='0 FIXED\n', var=var_name)
-                            run_model(temp_best_script, temp_best_result_path)
-                elif code == 134:
-                    update_list = unfix_list(temp_best_result_file, 'OMEGA')
-                    print 'Best model does not converge because it is near the boundary,\
-                        set OMEGA to 0.01 and rerun the model.'
-                    model_update(temp_best_script, temp_best_script,
-                                 update_list, '0.01\n', 'OMEGA')
-                    run_model(temp_best_script, temp_best_result_path)
-                else:
-                    shutil.copy(temp_best_script,
-                                'unconverge_'+temp_best_script)
-                    result_file_list.remove(temp_best_result_file)
-
-        if ss is False:
-            print 'Step %d is not improved.' % step
-            ss_list.append('NO')
-            break
-        else:
-            ss_list.append('YES')
-            best_index_list.append(best_index)
-            best_covariate_list.append(temp_covariate_list[best_index])
-            step += 1
-            model_update_initial(best_script, best_result_file, ncomp)
-            del insert_variables[insert_variables.keys()[best_index]]
-
-    pk_parameters_all = pk_para(ncomp)
-    pk_parameters = [pk_parameters_all[i] for i in omega_nonzero(script)]
-    trun_covariates = truncate_cov(covariates)
-    insert_variables = dict()
-    num = 1
-    for pk_parameter in pk_parameters:
-        for trun_covariate in trun_covariates:
-            if trun_covariate == 'SEX':
-                insert_variables[num] = \
-                    (pk_parameter, trun_covariate,
-                     '%s%s' % (pk_parameter, trun_covariate),
-                     trun_covariates[trun_covariate],
-                     covariates[trun_covariates[trun_covariate]])
-    # pk_parameter, truncated covariate
-    # insert_variable, covariate. variable_type
-                num += 1
-
-    print 'Adding SEX into covariate model.'
-    step = 1
-    num_steps = len(insert_variables)
-    while step <= num_steps:
-        result_file_list = []
-        result_path_list = []
-        script_list = []
-        temp_covariate_list = []
-        print "Step %d begins!" % step
-        for i, index in enumerate(insert_variables.keys()):
-            pk_parameter = insert_variables[index][0]
-            trun_covariate = insert_variables[index][1]
-            insert_variable = insert_variables[index][2]
-            covariate = insert_variables[index][3]
-            variable_type = insert_variables[index][4]
-            temp_covariate_list.append(insert_variable)
-            temp_script = 'model_covariate_seq_%d_%d.ctl' % (step, i)
-            if variable_type != 'factor':
-                covariate_median = np.median(data[covariate])
-                add_num_covariate(index, insert_variables,
-                                  covariate_median, best_script, temp_script)
-            else:
-                level = len(data[covariate].unique())
-                add_factor_covariate(index, insert_variables, level,
-                                     best_script, temp_script)
-            result_path_i = 'model_covariate_seq_%d_%d.out' % (step, i)
-            result_file_i = 'model_covariate_seq_%d_%d.ext' % (step, i)
-            script_list.append(temp_script)
-            result_path_list.append(result_path_i)
-            result_file_list.append(result_file_i)
-            run_model(temp_script, result_path_i)
-            obj = read_obj(result_file_i)
-            if obj == 999999999:
-                print 'Step %d model adding %s %s on %s crashes.' %\
-                    (step, variable_type, covariate, pk_parameter)
-                shutil.copy(temp_script, 'crash_'+temp_script)
-            else:
-                print 'Objective function of step ' + \
-                    '%d model adding %s %s on %s is %.8f' \
-                    % (step, variable_type, covariate, pk_parameter, obj)
-
-        add_covariate_list.append(temp_covariate_list)
-
-        converge = False
-        while result_file_list is not None and converge is False:
-            best_index = best_model_covariate(result_file_list)
-            print result_file_list
-            temp_best_result_file = 'model_covariate_seq_%d_%d.ext' % \
-                                    (step, best_index)
-            print 'Best file is ', temp_best_result_file
-            temp_best_script = 'model_covariate_seq_%d_%d.ctl' % \
-                (step, best_index)
-            temp_best_result_path = 'model_covariate_%d_%d.out' % \
-                (step, best_index)
-            dof = degree_free(temp_best_script, best_script)
-            ss = model_compare(temp_best_result_file, best_result_file,
-                               quantile, dof)
-            if ss is False:
-                break
-
-            converge, cv_error, _, code =\
-                model_converge(temp_best_result_file, ncomp)
-            if converge:
-                best_script = temp_best_script
-                best_result_file = temp_best_result_file
-                obj = read_obj(best_result_file)
-                print 'For step %d, the best' \
-                    ' objective function is %.8f' % (step, obj)
-            else:
-                if cv_error:
-                    _, name_list = find_index(cv_error)
-                    for index, var_name in name_list:
-                        if 'THETA' in var_name:
-                            print var_name, index+1,\
-                                ': coefficient variation is' +\
-                                ' bigger than 50%, fix it to 0 and run it.'
-                            model_update(temp_best_script, temp_best_script,
-                                         [index],
-                                         pattern='0 FIXED\n', var=var_name)
-                            run_model(temp_best_script, temp_best_result_path)
-                elif code == 134:
-                    update_list = unfix_list(temp_best_result_file, 'OMEGA')
-                    print 'Best model does not converge because it is near the boundary,\
-                        set OMEGA to 0.01 and rerun the model.'
-                    model_update(temp_best_script, temp_best_script,
-                                 update_list, '0.01\n', 'OMEGA')
-                    run_model(temp_best_script, temp_best_result_path)
-                else:
-                    shutil.copy(temp_best_script,
-                                'unconverge_'+temp_best_script)
-                    result_file_list.remove(temp_best_result_file)
-
-        if ss is False:
-            print 'Step %d is not improved.' % step
-            ss_list.append('NO')
-            break
-        else:
-            ss_list.append('YES')
-            best_index_list.append(best_index)
-            best_covariate_list.append(temp_covariate_list[best_index])
-            step += 1
-            model_update_initial(best_script, best_result_file, ncomp)
-            del insert_variables[insert_variables.keys()[best_index]]
-
-    with open('final_covariate_list.txt', 'w') as target:
-        target.write(str(best_covariate_list))
-    shutil.copy(best_script, 'best_'+best_script)
-    return best_script, best_result_file
-
-
-def covariate_model_fw(script, result_file, ncomp,
-                       cwdir, data, nobs, covariates, quantile):
-    """Add covariate to the structural model by forward selection.
-
-    'script' is the script you have for the structural model.
-    'covariates' is the covariates that you may want to include in the model.
-
-    It returns the best model script and result.
-    """
-    pk_parameters_all = pk_para(ncomp)
-    pk_parameters = [pk_parameters_all[i] for i in omega_nonzero(script)]
-    trun_covariates = truncate_cov(covariates)
-    insert_variables = dict()
-    num = 1
-    for pk_parameter in pk_parameters:
-        for trun_covariate in trun_covariates:
-            insert_variables[num] = \
-                (pk_parameter, trun_covariate,
-                 '%s%s' % (pk_parameter, trun_covariate),
-                 trun_covariates[trun_covariate],
-                 covariates[trun_covariates[trun_covariate]])
-# pk_parameter, truncated covariate, insert_variable, covariate. variable_type
-            num += 1
-
-    print 'Adding covariates into structural model.'
-    best_script = script
-    best_result_file = result_file
-    add_covariate_list = []
-    best_covariate_list = []
-    step = 1
-    best_index_list = []
-    ss_list = []
-    num_steps = len(insert_variables)
-    while step <= num_steps:
-        result_file_list = []
-        result_path_list = []
-        script_list = []
-        temp_covariate_list = []
-        print "Step %d begins!" % step
-        for i, index in enumerate(insert_variables.keys()):
-            pk_parameter = insert_variables[index][0]
-            trun_covariate = insert_variables[index][1]
-            insert_variable = insert_variables[index][2]
-            covariate = insert_variables[index][3]
-            variable_type = insert_variables[index][4]
-            temp_covariate_list.append(insert_variable)
-            temp_script = 'model_covariate_%d_%d.ctl' % (step, i)
-            if variable_type != 'factor':
-                covariate_median = np.median(data[covariate])
-                add_num_covariate(index, insert_variables,
-                                  covariate_median, best_script, temp_script)
-            else:
-                level = len(data[covariate].unique())
-                add_factor_covariate(index, insert_variables, level,
-                                     best_script, temp_script)
-            result_path_i = 'model_covariate_%d_%d.out' % (step, i)
-            result_file_i = 'model_covariate_%d_%d.ext' % (step, i)
-            script_list.append(temp_script)
-            result_path_list.append(result_path_i)
-            result_file_list.append(result_file_i)
-            run_model(temp_script, result_path_i)
-            obj = read_obj(result_file_i)
-            if obj == 999999999:
-                print 'Step %d model adding %s %s on %s crashes.' %\
-                    (step, variable_type, covariate, pk_parameter)
-                shutil.copy(temp_script, 'crash_'+temp_script)
-            else:
-                print 'Objective function of step ' + \
-                    '%d model adding %s %s on %s is %.8f' \
-                    % (step, variable_type, covariate, pk_parameter, obj)
-
-        add_covariate_list.append(temp_covariate_list)
-
-        converge = False
-        while result_file_list is not None and converge is False:
-            best_index = best_model_covariate(result_file_list)
-            temp_best_result_file = 'model_covariate_%d_%d.ext' % \
-                (step, best_index)
-            temp_best_script = 'model_covariate_%d_%d.ctl' % \
-                (step, best_index)
-            temp_best_result_path = 'model_covariate_%d_%d.out' %\
-                (step, best_index)
-            dof = degree_free(temp_best_script, best_script)
-            ss = model_compare(temp_best_result_file, best_result_file,
-                               quantile, dof)
-            if ss is False:
-                break
-
-            converge, cv_error, _, code =\
-                model_converge(temp_best_result_file, ncomp)
-            if converge:
-                best_script = temp_best_script
-                best_result_file = temp_best_result_file
-                obj = read_obj(best_result_file)
-                print 'For step %d, the best' \
-                    ' objective function is %.8f' % (step, obj)
-            else:
-                if cv_error:
-                    _, name_list = find_index(cv_error)
-                    for index, var_name in name_list:
-                        if 'THETA' in var_name:
-                            print var_name, index+1,\
-                                ': coefficient variation is' +\
-                                ' bigger than 50%, fix it to 0 and run it.'
-                            model_update(temp_best_script, temp_best_script,
-                                         [index],
-                                         pattern='0 FIXED\n', var=var_name)
-                            run_model(temp_best_script, temp_best_result_path)
-                elif code == 134:
-                    update_list = unfix_list(temp_best_result_file, 'OMEGA')
-                    print 'Best model does not converge because it is near the boundary,\
-                        set OMEGA to 0.01 and rerun the model.'
-                    model_update(temp_best_script, temp_best_script,
-                                 update_list, '0.01\n', 'OMEGA')
-                    run_model(temp_best_script, temp_best_result_path)
-                else:
-                    shutil.copy(temp_best_script,
-                                'unconverge_'+temp_best_script)
-                    result_file_list.remove(temp_best_result_file)
-
-        if ss is False:
-            print 'Step %d is not improved.' % step
-            ss_list.append('NO')
-            break
-        else:
-            ss_list.append('YES')
-            best_index_list.append(best_index)
-            best_covariate_list.append(temp_covariate_list[best_index])
-            step += 1
-            model_update_initial(best_script, best_result_file, ncomp)
-            del insert_variables[insert_variables.keys()[best_index]]
-
-    covariate_report_fw(best_script, ncomp,
-                        add_covariate_list, best_covariate_list, step,
-                        result_file, best_index_list, nobs, ss_list, cwdir)
-    return best_script, best_result_file
-
-
-def covariate_report_fw(best_script, ncomp,
-                        add_covariate_list, best_covariate_list, final_step,
-                        result_file, best_index_list, nobs, ss_list, cwdir):
-    """Generate a report after running covariate model."""
-    result_table = []
-    base_obj = read_obj(result_file)
-    title1 = ['Base model selected is %d compartment,' % ncomp +
-              ' objective function is %.4f.' % base_obj]
-    title2 = ['Covariance model development']
-    colnames = ['STEP', 'MODEL', 'NPAR', 'OBJ', 'AIC', 'BIC',
-                'MINIMIZATION', 'COVARIANCE', 'SELECT', 'SIGNIFICANT']
-    best = re.findall('\d+', best_script)
-    conclusion = ['The best model is the model in step %d.' % int(best[0])]
-    contents = []
-    for step in range(1, final_step):
-        regex = re.compile('model_covariate_%d_\d+.ctl' % step)
-        models = [ctl_file for ctl_file in os.listdir(cwdir)
-                  if re.match(regex, ctl_file)]
-        if models:
-            for i in range(0, 1+len(models)):
-                    if i == best_index_list[step-1]:
-                        the_model = 'model_covariate_%d_%d.ctl' % (step, i)
-                        result_file_i = the_model.replace('ctl', 'ext')
-                        xml_file = the_model.replace('ctl', 'xml')
-                        num_fixed = count_fixed(the_model)
-                        npar = 2 + 4*ncomp - num_fixed + step
-                        obj = read_obj(result_file_i)
-                        aic = obj + 2*npar
-                        bic = obj + npar*math.log(nobs)
-                        minimize = min_status(xml_file)
-                        converge, _, _, _ =\
-                            model_converge(result_file_i, ncomp)
-                        select = (step == int(best[0]))
-                        ss = ss_list[step-1]
-                        the_model = add_covariate_list[step-1][i] + \
-                            ', ' + ','.join(best_covariate_list[0:(step-1)])
-                        obs = []
-                        obs.extend([step, the_model, npar, obj, aic, bic,
-                                    minimize, converge, select, ss])
-                        contents.append(obs)
-
-    result_table.append(title1)
-    result_table.append(title2)
-    result_table.append(colnames)
-    result_table.extend(contents)
-    result_table.append(conclusion)
-    with open('fw_covariate_result.csv', 'wb') as csvfile:
-        writer = csv.writer(csvfile)
-        [writer.writerow(r) for r in result_table]
 
 
 def new_score_test(sim_script, paras, ncomp, base_result_file,
@@ -2036,8 +1475,8 @@ def true_new_score_test(sim_script, paras, ncomp, base_result_file,
     return select_list, select_lrt_list
 
 
-def covariate_model_step(script, ncomp,
-                         cwdir, data, nobs, covariates,
+def covariate_model_step(foce_script, base_script,
+                         cwdir, insert_variables, data, nobs, covariates,
                          in_quantile, out_quantile, select_list=[]):
     """Stepwise method in PK-PD.
 
@@ -2045,7 +1484,7 @@ def covariate_model_step(script, ncomp,
     do backward elimination.
 
     'script' is the structural model script.
-    'ncomp' is the number of compartment of the structural model.
+    'base_script' is NONMEME script without any covariates.
     'cwdir' is the current working directory.
     'nobs' is the number of observation in the dataset.
     'data' is the dataset.
@@ -2058,11 +1497,9 @@ def covariate_model_step(script, ncomp,
     It returns the best model script and result.
     """
     run_count = 0
-    # create template for full model
-    full_script = 'full_script.ctl'
-    _, _, _, insert_variables = \
-        full_model(script, full_script,
-                   ncomp, data, covariates, IMPMAP=False)
+    base_theta_num = count_theta(base_script)
+    theta_num = count_theta(foce_script)
+    omega_num = count_omega(foce_script)
 
     # initialize the best script and result file
     best_script = 'base_sw.ctl'
@@ -2071,21 +1508,20 @@ def covariate_model_step(script, ncomp,
 
     # calculate the number of thetas
     # create a full set of list
-    num_theta = count_theta(full_script)
-    full_set = range(1, num_theta-2*ncomp+1)
+    full_set = range(1, theta_num-base_theta_num+1)
 
     # create update list for those covariates already selected
-    update_list = [x+2*ncomp-1 for x in full_set
-                   if x+2*ncomp not in select_list]
+    update_list = [x+base_theta_num-1 for x in full_set
+                   if x+base_theta_num not in select_list]
 
     # update the template according to the covariates selected
-    model_update(full_script, best_script, update_list,
+    model_update(foce_script, best_script, update_list,
                  pattern='0 FIXED\n', var='THETA')
 
     # run the model to get base OFV
     run_model(best_script, best_result_path)
 
-    select = [x-2*ncomp for x in select_list]
+    select = [x-base_theta_num for x in select_list]
 
     # forward selection begins
     step = 1
@@ -2110,7 +1546,7 @@ def covariate_model_step(script, ncomp,
             result_file_i = 'model_covariate_add_%d_%d.ext' % (step, i)
             control_file_i = 'model_covariate_add_%d_%d.ctl' % (step, i)
 
-            model_update(best_script, control_file_i, [index+2*ncomp-1],
+            model_update(best_script, control_file_i, [index+base_theta_num-1],
                          pattern='(-10, 0.01, 10)\n', var='THETA')
 
             run_model(control_file_i, result_path_i)
@@ -2149,7 +1585,7 @@ def covariate_model_step(script, ncomp,
                 break
 
             converge, cv_error, _, code =\
-                model_converge(temp_best_result_file, ncomp)
+                model_converge(temp_best_result_file)
             # force every model to be converged
             converge = True
             if converge:
@@ -2201,7 +1637,7 @@ def covariate_model_step(script, ncomp,
         if f_ss is False:
             print 'Step %d is not improved.' % step
             break
-        model_update_initial(best_script, best_result_file, ncomp)
+        model_update_initial(best_script, best_result_file, base_theta_num)
         step += 1
     shutil.copy(best_script, 'best_fw_' + best_script)
 
@@ -2230,7 +1666,7 @@ def covariate_model_step(script, ncomp,
                 % (step, i)
 
             model_update(best_script, control_file_i,
-                         [index+2*ncomp-1],
+                         [index+base_theta_num-1],
                          pattern='0 FIXED\n', var='THETA')
 
             run_model(control_file_i, result_path_i)
@@ -2268,10 +1704,11 @@ def covariate_model_step(script, ncomp,
         obj = read_obj(best_result_file)
         select = [x for x in select if x != select[worst_index]]
 
-        model_update_initial(best_script, best_result_file, ncomp)
+        model_update_initial(best_script, best_result_file, base_theta_num)
         step += 1
     shutil.copy(best_script, 'best_sw_' + best_script)
-    best_select = range(1, 1+2*ncomp) + [x+2*ncomp for x in select]
+    best_select = range(1, 1+base_theta_num) +\
+     [x+base_theta_num for x in select]
     with open('sw_set.txt', 'w') as target:
         target.write(str(best_select))
 
@@ -2280,35 +1717,29 @@ def covariate_model_step(script, ncomp,
     return best_script, best_result_file
 
 
-def covariate_model_bw(script,
-                       ncomp,
-                       cwdir,
-                       data,
-                       nobs,
-                       covariates,
-                       quantile,
-                       select_list=[],
-                       options=''):
+def covariate_model_bw(script, base_theta_num,
+                       cwdir, data, nobs, covariates,
+                       quantile, select_list=[], options='',
+                       version=74):
     """Backward method in PK-PD. Do backward elimination.
 
-    'script' is the structural model script.
-    'ncomp' is the number of compartment of the structural model.
-    'cwdir' is the current working directory.
-    'nobs' is the number of observation in the dataset.
-    'data' is the dataset.
-    'nobs' is the number of observation
-    'covariates' are the potential covariates.
-    'quantile' is the p value used to backward selection.
-    'select_list' is the list that contains covariates already selected.
+    script is the NONMEM script without any covariates
+    base_theta_num is the number of thetas in base model without any covariates
+    cwdir is the current working directory
+    nobs is the number of observation in the dataset
+    data is the dataset
+    nobs is the number of observation
+    covariates are the potential covariates.
+    quantile is the p value used to backward selection.
+    select_list is the list that contains covariates pre-selected
 
     It returns the best model script and result.
     """
-    run_count = 0
     # create template for full model
+    base_script = 'base_model.ctl'
     full_script = 'full_script.ctl'
     _, _, _, insert_variables = \
-        full_model(script, full_script,
-                   ncomp, data, covariates, IMPMAP=False)
+        full_model(base_script, full_script, data, covariates)
 
     # initialize the best script and result file
     best_script = 'base_bw.ctl'
@@ -2318,142 +1749,22 @@ def covariate_model_bw(script,
     # calculate the number of thetas
     # create a full set of list
     num_theta = count_theta(full_script)
-    full_set = range(1, num_theta-2*ncomp+1)
+    full_set = range(1, num_theta-base_theta_num+1)
 
     # create update list for those covariates already selected
-    update_list = []
-    for x in full_set:
-        if x+2*ncomp not in select_list:
-            update_list.append(x+2*ncomp-1)
+    update_list = [x+base_theta_num-1 for x in full_set
+                   if x+base_theta_num not in select_list]
 
     # update the template according to the covariates selected
     model_update(full_script, best_script, update_list,
                  pattern='0 FIXED\n', var='THETA')
 
     # run the model to get base OFV
-    run_model(best_script, best_result_path, options)
-
-    select = [x-2*ncomp for x in select_list]
-
-    # backward elimination begins
-    # backward elimination begins
-    step = 1
-    while True:
-        print 'Backward elimination step %d.' % step
-        d_temp_covariate_list = []
-        result_file_list = []
-        result_path_list = []
-        script_list = []
-        for i, index in enumerate(select):
-            pk_parameter = insert_variables[index][0]
-            insert_variable = insert_variables[index][2]
-            covariate = insert_variables[index][3]
-            variable_type = insert_variables[index][4]
-            d_temp_covariate_list.append(insert_variable)
-            print 'Deleting', variable_type, covariate, \
-                'on', pk_parameter
-            result_path_i = 'model_covariate_del_%d_%d.out' % (step, i)
-            result_file_i = 'model_covariate_del_%d_%d.ext' % (step, i)
-            control_file_i = 'model_covariate_del_%d_%d.ctl'\
-                % (step, i)
-
-            model_update(best_script, control_file_i,
-                         [index+2*ncomp-1],
-                         pattern='0 FIXED\n', var='THETA')
-
-            run_model(control_file_i, result_path_i, options)
-            run_count += 1
-            script_list.append(control_file_i)
-            result_path_list.append(result_path_i)
-            result_file_list.append(result_file_i)
-            obj = read_obj(result_file_i)
-            if obj == 999999999:
-                print 'Step %d model deleting %s %s on %s crashes.' %\
-                    (step, variable_type, covariate, pk_parameter)
-                shutil.copy(control_file_i, 'crash_'+control_file_i)
-            else:
-                print 'Objective function of step ' + \
-                    '%d model deletes %s %s on %s is %.4f' \
-                    % (step, variable_type, covariate,
-                        pk_parameter, obj)
-
-        worst_index = best_model_covariate(result_file_list)
-        temp_best_result_file = 'model_covariate_del_%d_%d.ext' % \
-            (step, worst_index)
-        temp_best_script = 'model_covariate_del_%d_%d.ctl' % \
-            (step, worst_index)
-        dof = degree_free(temp_best_script, best_script)
-        b_ss = model_compare(temp_best_result_file, best_result_file,
-                             quantile, dof)
-        if b_ss:
-            print 'There is nothing to delete for step %s.' % step
-            break
-
-        best_script = temp_best_script
-        best_result_file = temp_best_result_file
-        obj = read_obj(best_result_file)
-        select = [x for x in select if x != select[worst_index]]
-
-        model_update_initial(best_script, best_result_file, ncomp)
-        step += 1
-
-    shutil.copy(best_script, 'best_bw_' + best_script)
-    best_select = range(1, 1+2*ncomp) + [x+2*ncomp for x in select]
-    with open('bw_set.txt', 'w') as target:
-        target.write(str(best_select))
-
-    with open('model_run_count.txt', 'w') as target:
-        target.write(str(run_count))
-    return best_script, best_result_file, best_select
-
-
-def covariate_model_bw_gnr(script, ncomp,
-                           cwdir, data, nobs, covariates,
-                           quantile, select_list=[], options=''):
-    """Backward method in PK-PD. Do backward elimination.
-
-    'script' is the structural model script.
-    'ncomp' is the number of compartment of the structural model.
-    'cwdir' is the current working directory.
-    'nobs' is the number of observation in the dataset.
-    'data' is the dataset.
-    'nobs' is the number of observation
-    'covariates' are the potential covariates.
-    'quantile' is the p value used to backward selection.
-    'select_list' is the list that contains covariates already selected.
-
-    It returns the best model script and result.
-    """
-    # create template for full model
-    base_script = 'base_model.ctl'
-    full_script = 'full_script.ctl'
-    _, _, _, insert_variables = \
-        full_model_gnr(base_script, full_script, data, covariates)
-
-    # initialize the best script and result file
-    best_script = 'base_bw.ctl'
-    best_result_file = 'base_bw.ext'
-    best_result_path = 'base_bw.out'
-
-    # calculate the number of thetas
-    # create a full set of list
-    num_theta = count_theta_gnr(full_script)
-    full_set = range(1, num_theta-ncomp+1)
-
-    # create update list for those covariates already selected
-    update_list = [x+ncomp-1 for x in full_set
-                   if x+ncomp not in select_list]
-
-    # update the template according to the covariates selected
-    model_update(full_script, best_script, update_list,
-                 pattern='0 FIXED\n', var='THETA')
-
-    # run the model to get base OFV
-    run_model(best_script, best_result_path, options)
+    run_model(best_script, best_result_path, options, version=version)
 
     # only take the last part of results
-    best_result_file = sep_ext_gnr(best_result_file)
-    select = [x-ncomp for x in select_list]
+    best_result_file = sep_ext(best_result_file)
+    select = [x-base_theta_num for x in select_list]
 
     # backward elimination begins
     step = 1
@@ -2463,24 +1774,24 @@ def covariate_model_bw_gnr(script, ncomp,
         result_path_list = []
         script_list = []
         for i, index in enumerate(select):
-            print 'Deleting Theta', index + ncomp
+            print 'Deleting Theta', index + base_theta_num
             result_path_i = 'model_covariate_del_%d_%d.out' % (step, i)
             result_file_i = 'model_covariate_del_%d_%d.ext' % (step, i)
             control_file_i = 'model_covariate_del_%d_%d.ctl'\
                 % (step, i)
 
             model_update(best_script, control_file_i,
-                         [index+ncomp-1],
+                         [index+base_theta_num-1],
                          pattern='0 FIXED\n', var='THETA')
 
-            run_model(control_file_i, result_path_i, options)
-            result_file_i = sep_ext_gnr(result_file_i)
+            run_model(control_file_i, result_path_i, options, version=version)
+            result_file_i = sep_ext(result_file_i)
             script_list.append(control_file_i)
             result_path_list.append(result_path_i)
             result_file_list.append(result_file_i)
             obj = read_obj(result_file_i)
             if obj == 999999999:
-                print 'Deleting Theta', index + ncomp
+                print 'Deleting Theta', index + base_theta_num
                 shutil.copy(control_file_i, 'crash_'+control_file_i)
             else:
                 print 'Objective function of step %d is %.4f' % (step, obj)
@@ -2502,175 +1813,65 @@ def covariate_model_bw_gnr(script, ncomp,
         obj = read_obj(best_result_file)
         select = [x for x in select if x != select[worst_index]]
 
-        model_update_initial_gnr(best_script, best_result_file, ncomp)
+        if len(select) == 0:
+            best_script = base_script
+            best_result_file = base_script.replace(".ctl", ".ext")
+            print 'The best model is the base model.'
+            break
+
+        model_update_initial(best_script, best_result_file, base_theta_num)
         step += 1
 
     shutil.copy(best_script, 'best_bw_' + best_script)
-    best_select = range(1, 1+ncomp) + [x+ncomp for x in select]
+    best_select = range(1, 1+base_theta_num) + [x+base_theta_num for x in select]
     with open('bw_set.txt', 'w') as target:
         target.write(str(best_select))
 
     return best_script, best_result_file, best_select
-
-
-def full_model_gnr(base_script, script, data, covariates):
-    """Construct the full model for WAM on a generalized base."""
-    # create related files for full model script
-    result_path = script.replace('ctl', 'out')
-    result_file = script.replace('ctl', 'ext')
-    cov_file = script.replace('ctl', 'cov')
-
-    # find all the typical values in the model
-    tvs_all = []
-    with open(base_script, 'r') as target:
-        for line in target:
-            if line.startswith('TV'):
-                tvs_all.append(line.split('=')[0].replace('TV', ''))
-    tvs = [tvs_all[i] for i in omega_nonzero(base_script)]
-
-    # truncate all covariates
-    trun_covariates = truncate_cov(covariates)
-
-    # construct a dictionary for the parameter covariate relationship
-    insert_variables = dict()
-    num = 1
-    for tv in tvs:
-        for trun_covariate in trun_covariates:
-            insert_variables[num] = \
-                (tv, trun_covariate,
-                 '%s%s' % (tv, trun_covariate),
-                 trun_covariates[trun_covariate],
-                 covariates[trun_covariates[trun_covariate]])
-# pk_parameter, truncated covariate, insert_variable, covariate. variable_type
-            num += 1
-
-    # copy base_script to script
-    shutil.copy(base_script, script)
-
-    # add covariate parameter one by one
-    for index in range(1, len(insert_variables)+1):
-        variable_type = insert_variables[index][4]
-        covariate = insert_variables[index][3]
-        tv = insert_variables[index][0]
-        print 'add', insert_variables[index][2]
-        if variable_type != 'factor':
-            covariate_median = np.median(data[covariate])
-            add_num_covariate_gnr(index, insert_variables,
-                                  covariate_median, script, script)
-        else:
-            level = len(data[covariate].unique())
-            add_factor_covariate_gnr(index, insert_variables, level,
-                                     script, script)
-    return result_path, cov_file, result_file, insert_variables
-
-
-def add_num_covariate_gnr(index, insert_variables,
-                          median, best_script, new_script):
-    """Add numerical covariate to the best structural model."""
-    tv = insert_variables[index][0]
-    insert_variable = insert_variables[index][2]
-    covariate = insert_variables[index][3]
-    theta_num = 0
-    with open(best_script, 'r') as script:
-        for line in script:
-            if 'THETA(' in line:
-                theta_num += 1
-
-    # add continuous covariates
-    output_lines = []
-    with open(best_script, 'r') as script:
-        for line in script:
-            if line.startswith('$PRED' | '$PK'):
-                output_lines.append(line)
-                output_lines.append('%s=(%s/%.8f)**THETA(%d)\n' %
-                                    (insert_variable,
-                                     covariate,
-                                     median,
-                                     theta_num+1))
-                continue
-            if line.startswith('TV' + tv + '='):
-                output_lines.append(line.strip('\n') +
-                                    '*%s\n' % insert_variable)
-                continue
-            if line.startswith('$OMEGA'):
-                output_lines.append('(-10, 0.1, 10)\n')
-            output_lines.append(line)
-
-    with open(new_script, 'w') as script:
-        for line in output_lines:
-            script.write(line)
-
-
-def add_factor_covariate_gnr(index, insert_variables,
-                             level, best_script, new_script):
-    """Add factor covariate to the best structural model."""
-    tv = insert_variables[index][0]
-    insert_variable = insert_variables[index][2]
-    covariate = insert_variables[index][3]
-    theta_num = 0
-    # count theta number
-    with open(best_script, 'r') as script:
-        for line in script:
-            if 'THETA(' in line:
-                theta_num += 1
-
-    # add factor covariates
-    output_lines = []
-    with open(best_script, 'r') as script:
-        for line in script:
-            if line.startswith('$PRED' | '$PK'):
-                output_lines.append(line)
-                output_lines.append('%s=1\n' % insert_variable)
-                for j in range(1, level):
-                    output_lines.append('IF(%s==%d) %s=EXP(THETA(%d))\n' %
-                                        (covariate, j,
-                                         insert_variable, theta_num+j))
-                continue
-            if line.startswith('TV' + tv + '='):
-                output_lines.append(line.strip('\n') +
-                                    '*%s\n' % insert_variable)
-                continue
-            if line.startswith('$OMEGA'):
-                for j in range(1, level):
-                    output_lines.append('(-10, 0.1, 10)\n')
-            output_lines.append(line)
-
-    with open(new_script, 'w') as target:
-        for line in output_lines:
-            target.write(line)
-
 
 def count_omega(script):
     """Count number of OMEGA."""
     omega_num = 0
     with open(script, 'r') as target:
         for line in target:
-            if 'OMEGA(' in target:
+            if 'ETA(' in target:
                 omega_num += 1
     return omega_num
 
 
-def bw_wald_gnr(thetas, cov, script, base_script, nobs,
-                insert_variables, cwdir, covariates, data,
-                quantile, quantile1=0.995, options='-PARAFILE=FPI.PNM'):
-    """Backward elimination based WAM p-value = 0.005.
-
-    Use strict p-value for futher real fit on the selected variables.
+def bw_wald(thetas, cov, script, base_script, nobs,
+            insert_variables, cwdir, covariates, data,
+            quantile, quantile1, options='', version=74, bw_nm=True):
+    """Main function for HWAM.
+    thetas is the thetas vector from full model
+    cov is the covariance matrix from full model
+    script is NONMEM script with all covariates
+    base_script is NONMEM script without any covariates
+    nobs is the number of obserations from dataset
+    insert_variables is all the covarate-parameter relationship
+    cwdir is the current working directory
+    covariates is all the covariates
+    data is the NONMEM dataset
+    quantile is the significance level for BE using approximation.
+    quantile1 is the significance level for BE using NONMEM
+    options is the option used for NONMEM run in the conmmand line1
+    version is the NONMEM version used
+    bw_nm is true means we need to run second confirmation in NONMEM
     """
-    tv_num = count_tv(script) + 2
-    theta_num = count_theta_gnr(script)
+    base_theta_num = count_theta(base_script)
+    theta_num = count_theta(script)
     omega_num = count_omega(script)
     p = theta_num + omega_num - count_fixed(script)
     n = nobs
     non_select_list = []
-    select_list = range(0, theta_num-tv_num)
+    select_list = range(0, theta_num-base_theta_num)
     bw_list = []
     best_lrt = 0
     flag = True
 
     temp_final_select_list = []
     i = 0
-    while i < (theta_num-tv_num):
+    while i < (theta_num-base_theta_num):
         temp_sbc_list = []
         for x in select_list:
             temp_non_select_list = non_select_list + [x]
@@ -2688,7 +1889,7 @@ def bw_wald_gnr(thetas, cov, script, base_script, nobs,
                 flag = False
                 temp_final_select_list.append(new_point)
         if flag:
-            bw_list.append(([x+tv_num+1 for x in temp_set], item_min))
+            bw_list.append(([x+base_theta_num+1 for x in temp_set], item_min))
 
         best_lrt = item_min
         non_select_list = temp_set
@@ -2696,135 +1897,19 @@ def bw_wald_gnr(thetas, cov, script, base_script, nobs,
         i += 1
 
     best_set = temp_final_select_list[:]
-    update_list = [x+tv_num+1 for x in best_set]
+    update_list = [x+base_theta_num+1 for x in best_set]
     print 'Best set is ', update_list
-    _, _, back_select_list = covariate_model_bw_gnr(base_script, tv_num,
+    back_select_list = update_list
+    with open('wam_interim_result.txt', 'w') as target:
+        target.write(str(update_list))
+    if bw_nm:
+        _, _, back_select_list = covariate_model_bw(base_script, base_theta_num,
                                                     cwdir, data, nobs,
                                                     covariates,
                                                     quantile,
                                                     select_list=update_list,
-                                                    options=options)
-    # best_set = temp_final_select_list[:]
-    # update_list = [x+tv_num for x in temp_final_non_select_list]
-    # best_script = 'bw_wam.ctl'
-    #
-    # model_update(script, best_script, update_list,
-    #              pattern='0 FIXED\n', var='THETA')
-    #
-    # best_result_path = best_script.replace('ctl', 'out')
-    # best_result_file = best_script.replace('ctl', 'ext')
-    # run_model(best_script, best_result_path, '-PARAFILE=FPI.PNM')
-    # best_result_file = sep_ext_gnr(best_result_file)
-    # i = 0
-    # back_ind = True
-    # while True:
-    #     temp_final_non_select_list += [temp_final_select_list.pop(0)]
-    #     temp_update_list = [x+tv_num for x in temp_final_non_select_list]
-    #     temp_script = 'temp_bw_wam_%d.ctl' % i
-    #
-    #     model_update(script, temp_script, temp_update_list,
-    #                  pattern='0 FIXED\n', var='THETA')
-    #     temp_result_path = temp_script.replace('ctl', 'out')
-    #     temp_result_file = temp_script.replace('ctl', 'ext')
-    #     run_model(temp_script, temp_result_path, '-PARAFILE=FPI.PNM')
-    #     temp_result_file = sep_ext_gnr(temp_result_file)
-    #     if model_compare(best_result_file, temp_result_file, quantile, 1):
-    #         if i > 1:
-    #             back_ind = False
-    #         break
-    #     else:
-    #         best_result_file = temp_result_file
-    #         best_script = temp_script
-    #         best_set = temp_final_select_list[:]
-    #     i += 1
-    # shutil.copy(best_script, 'best_bw_' + best_script)
-    # best_set.sort()
-    return bw_list, back_select_list
-
-
-def bw_wald(thetas, cov, ncomp, script, base_script, nobs,
-            insert_variables, cwdir,
-            covariates, data, quantile, quantile0=0.99):
-    """Backward elimination based on WAM.
-
-    Use strict p-value for futher real fit on the selected variables.
-    """
-    theta_num = count_theta(script)
-    p = theta_num + 2*ncomp + 2 - count_fixed(script)
-    n = nobs
-    non_select_list = []
-    select_list = range(0, theta_num-2*ncomp)
-    bw_list = []
-    best_lrt = 0
-
-    temp_final_select_list = []
-    # temp_final_non_select_list = []
-    i = 0
-    flag = True
-    while i < (theta_num-2*ncomp):
-        temp_sbc_list = []
-        for x in select_list:
-            temp_non_select_list = non_select_list + [x]
-            q = len(temp_non_select_list)
-            _, the_lrt = sbc_wam(thetas, cov, temp_non_select_list, p, q, n)
-            temp_sbc_list.append((temp_non_select_list, x, the_lrt))
-        temp_set, new_point, item_min = \
-            min(temp_sbc_list, key=operator.itemgetter(2))
-
-        if not flag:
-            temp_final_select_list.append(new_point)
-
-        if flag:
-            # temp_final_non_select_list = non_select_list
-            if item_min - best_lrt > stats.chi2.ppf(quantile0, 1):
-                flag = False
-                temp_final_select_list.append(new_point)
-            bw_list.append(([x+2*ncomp+1 for x in temp_set], item_min))
-
-        best_lrt = item_min
-        non_select_list = temp_set
-        select_list = [x for x in select_list if x not in non_select_list]
-        i += 1
-
-    best_set = temp_final_select_list[:]
-    update_list = [x+2*ncomp+1 for x in best_set]
-    print 'Best set is ', update_list
-    _, _, back_select_list = covariate_model_bw(base_script,
-                                                ncomp,
-                                                cwdir, data, nobs,
-                                                covariates,
-                                                quantile,
-                                                select_list=update_list)
-    # best_script = 'bw_wam.ctl'
-    # model_update(script, best_script, update_list,
-    #              pattern='0 FIXED\n', var='THETA')
-
-    # best_result_path = best_script.replace('ctl', 'out')
-    # best_result_file = best_script.replace('ctl', 'ext')
-    # run_model(best_script, best_result_path)
-
-    # i = 0
-    # back_ind = True
-    # while True:
-    #     temp_final_non_select_list += [temp_final_select_list.pop(0)]
-    #     temp_update_list = [x+2*ncomp for x in temp_final_non_select_list]
-    #     temp_script = 'temp_bw_wam_%d.ctl' % i
-    #
-    #     model_update(script, temp_script, temp_update_list,
-    #                  pattern='0 FIXED\n', var='THETA')
-    #     temp_result_path = temp_script.replace('ctl', 'out')
-    #     temp_result_file = temp_script.replace('ctl', 'ext')
-    #     run_model(temp_script, temp_result_path)
-    #     if model_compare(best_result_file, temp_result_file, quantile, 1):
-    #         if i > 1:
-    #             back_ind = False
-    #         break
-    #     else:
-    #         best_result_file = temp_result_file
-    #         best_script = temp_script
-    #         best_set = temp_final_select_list[:]
-    #     i += 1
-    # back_select_list = range(1, 1+2*ncomp) + [x+1+2*ncomp for x in best_set]
+                                                    options=options,
+                                                    version=74)
     return bw_list, back_select_list
 
 
@@ -3257,22 +2342,6 @@ def score_test_inv(paras, obs_fim, ncomp, script, base_result_file,
     return score_list
 
 
-def modify_r_script(sample_size, sparsity, r_script_original, r_script_sim):
-    """Modify R script for different scenarios."""
-    output_lines = []
-    with open(r_script_original, 'r') as target:
-        for line in target:
-            if line.startswith('id_num'):
-                line = line.replace('100', sample_size)
-            if line.startswith('sparsity'):
-                line = line.replace('extensive', sparsity)
-            output_lines.append(line)
-
-    with open(r_script_sim, 'w') as target:
-        for line in output_lines:
-            target.write(line)
-
-
 def modify_positive_matrix(matrix, method=1):
     if method == 1:
         u, V = np.linalg.eig(matrix)
@@ -3295,3 +2364,781 @@ def modify_positive_matrix(matrix, method=1):
         print 'The modified eigenvalues are ', u
         matrix = np.dot(V, np.dot(np.diag(u), np.transpose(V)))
     return matrix
+
+
+def RMSE_Value(error_vector):
+    """Calculate RMSE."""
+    return ((error_vector.dot(error_vector)) / len(error_vector))**(1.0/2)
+
+def create_NONMEM_data_1(sample_size, sparsity, cov_data):
+    """Create NONMEM simulation data for one compartment.
+
+    sample_size is the sample size.
+    sparsity is the sparsity of the simulation design.
+    cov_data is the covariate data from NHANES dataset.
+    """
+    cov_df = pd.read_csv(cov_data)
+    sample_size = pd.to_numeric(sample_size)
+    sub_cov_data  = cov_df.sample(n=sample_size, replace=False)
+    col_names = ['CID', 'TIME', 'EVID', 'AMT', 'RATE', 'DV', 'AGE',\
+        'WT', 'SEX', 'ALB', 'ALP', 'ALT']
+    if sparsity.startswith("Intensive"):
+        t = [0, 2, 4, 8, 12, 24]
+    else:
+        t = [0] + sample(range(1, 13), 1) + sample(range(13, 25), 1)
+    n = len(t)
+    ID = [0] * (n*sample_size)
+    TIME = [0] * (n*sample_size)
+    EVID = [0] * (n*sample_size)
+    AMT = [0] * (n*sample_size)
+    RATE = [0] * (n*sample_size)
+    DV = [0] * (n*sample_size)
+    AGE = [0] * (n*sample_size)
+    WT = [0] * (n*sample_size)
+    SEX = [0] * (n*sample_size)
+    ALB = [0] * (n*sample_size)
+    ALP = [0] * (n*sample_size)
+    ALT = [0] * (n*sample_size)
+    for i in range(1, sample_size+1):
+        ID[(i-1)*n:i*n] = [i] * n
+        TIME[(i-1)*n:i*n] = t
+        EVID[(i-1)*n:i*n] = [0] * n
+        EVID[(i-1)*n] = 1
+        AMT[(i-1)*n:i*n] = [0] * n
+        AMT[(i-1)*n] = 1000
+        RATE[(i-1)*n:i*n] = [0] * n
+        DV[(i-1)*n:i*n] = [0] * n
+    list_data = list(zip(ID, TIME, EVID, AMT, RATE, DV,
+                         AGE, WT, SEX, ALB, ALP, ALT))
+    df = pd.DataFrame(data=list_data, columns = col_names)
+    cov_index = ['AGE', 'WT', 'SEX', 'ALB', 'ALP', 'ALT']
+    for i in range(1, sample_size+1):
+        for cov_index_j in cov_index:
+            df.loc[df['CID'] == i, cov_index_j] =\
+                cov_df.loc[i, cov_index_j]
+    df.to_csv('full_sim_data.csv', index=False)
+
+def create_NONMEM_data_2(cov_data):
+    """Create NONMEM simulation data for Rituximab.
+
+    cov_data is the covariate data from NHANES dataset.
+    """
+    rituximab_data = pd.read_csv('rituximab.csv')
+    cov_df = pd.read_csv(cov_data)
+    sample_size = len(np.unique(rituximab_data['CID']))
+    sub_cov_data  = cov_df.sample(n=sample_size, replace=False)
+    col_names = ['CID', 'TIME', 'EVID', 'AMT', 'RATE', 'DV', 'AGE',
+        'SEX', 'BSA', 'ALB', 'ALP', 'ALT', 'AST', 'HCT',
+        'LDH', 'PC', 'SCR', 'TB']
+    t1 = [0, 3.0/24, 6.0/24, 48.0/24]
+    t2 = [14.0, 14+3.0/24, 14+6.0/24, 14+48.0/24, 14+336.0/24,
+            14+1088.0/24, 14+2352.0/24, 14+3696.0/24]
+    t = t1 + t2
+    n = len(t)
+    ID = [0] * (n*sample_size)
+    TIME = [0] * (n*sample_size)
+    EVID = [0] * (n*sample_size)
+    AMT = [0] * (n*sample_size)
+    RATE = [0] * (n*sample_size)
+    DV = [0] * (n*sample_size)
+    AGE = [0] * (n*sample_size)
+    SEX = [0] * (n*sample_size)
+    BSA = [0] * (n*sample_size)
+    ALB = [0] * (n*sample_size)
+    ALP = [0] * (n*sample_size)
+    ALT = [0] * (n*sample_size)
+    AST = [0] * (n*sample_size)
+    HCT = [0] * (n*sample_size)
+    LDH = [0] * (n*sample_size)
+    PC = [0] * (n*sample_size)
+    SCR = [0] * (n*sample_size)
+    TB = [0] * (n*sample_size)
+    for i in range(1, sample_size+1):
+        ID[(i-1)*n:i*n] = [i] * n
+        TIME[(i-1)*n:i*n] = t
+        EVID[(i-1)*n:i*n] = [0] * n
+        EVID[(i-1)*n] = 1
+        EVID[(i-1)*n+len(t1)] = 1
+        AMT[(i-1)*n:i*n] = [0] * n
+        AMT[(i-1)*n] = 1000
+        AMT[(i-1)*n+len(t1)] = 1000
+        RATE[(i-1)*n:i*n] = [0] * n
+        RATE[(i-1)*n] = round(1000.0/(255.0/(60.0*24.0)))
+        RATE[(i-1)*n+len(t1)] = round(1000.0/(195.0/(60.0*24.0)))
+        DV[(i-1)*n:i*n] = [0] * n
+    list_data = list(zip(ID, TIME, EVID, AMT, RATE, DV,
+                         AGE, SEX, BSA, ALB, ALP, ALT, AST,
+                         HCT, LDH, PC, SCR, TB))
+    df = pd.DataFrame(data=list_data, columns = col_names)
+    cov_index = ['AGE','SEX', 'BSA', 'ALB', 'ALP', 'ALT', 'AST', 'HCT',
+        'LDH', 'PC', 'SCR', 'TB']
+    for i in range(1, sample_size+1):
+        for cov_index_j in cov_index:
+            df.loc[df['CID'] == i, cov_index_j] =\
+                cov_df.loc[i, cov_index_j]
+    df.to_csv('full_sim_data.csv', index=False)
+
+def run_one_comp(sample_size, sparsity, num_sim, home_dir):
+    covariates = {'AGE': 'continuous variable',
+                  'WT': 'continuous variable',
+                  'SEX': 'factor',
+                  'ALB': 'continuous variable',
+                  'ALP': 'continuous variable',
+                  'ALT': 'continuous variable'}
+    # select_0 = [5, 6, 12]
+    WAM_RMSE = []
+    WAMBE_RMSE = []
+    SW_RMSE = []
+    # specify the simulation times
+    i = 0
+    while i < num_sim:
+        try:
+            # change to current work directory
+            print 'Begin Simulation %d!.' % i
+            project_path = home_dir + '\\One_Compartment'
+            os.chdir(project_path)
+            current_path = create_folder(project_path, 'Sample_Size_%s_%s' % (sample_size, sparsity))
+            file_list = ['nmfe74.bat', 'data_sim_0.ctl', 'data_sim_0_Corr.ctl',
+                         'base_model.ctl', 'base_model_Corr.ctl', 'pat_sim_data.csv']
+            for file_ in file_list:
+                shutil.copy(os.path.join(project_path, file_), current_path)
+
+            os.chdir(current_path)
+
+            # change the median in simulation control file
+            data_demo = pd.read_csv('pat_sim_data.csv')
+            wt_median = round(np.median(data_demo.WT), 3)
+            outlines = []
+            sim_file_0 = 'data_sim_0.ctl'
+            if sparsity.endswith('Corr'):
+                sim_file_0 = 'data_sim_0_Corr.ctl'
+            with open(sim_file_0, 'r') as target:
+                for line in target:
+                    if line.startswith('CLWT') or line.startswith('VWT'):
+                        old_median = float(re.findall(r'\d+\.\d+', line)[0])
+                        line = line.replace(str(old_median), str(wt_median))
+                    outlines.append(line)
+            with open('data_sim.ctl', 'w') as target:
+                for line in outlines:
+                    target.write(line)
+
+            # create NONMEM dataset
+            create_NONMEM_data_1(sample_size, sparsity, 'pat_sim_data.csv')
+
+            # run simulation in NONMEM to simulate data_sim.csv
+            # using the previous template rituxan.csv
+            # reset the random seed in NONMEM simulation file
+            outlines = []
+            with open('data_sim.ctl', 'r') as target:
+                for line in target:
+                    if line.startswith('$SIMULATION'):
+                        line = '$SIMULATION (123456%d) ONLYSIMULATION SUBPROBLEM=1\n' % i
+                    if line.startswith('$TABLE'):
+                        line = '$TABLE ID TIME EVID AMT RATE DV' +\
+                            ' AGE WT SEX ALB ALP ALT FILE=data_sim.csv\n'
+                    outlines.append(line)
+
+            with open('data_sim.ctl', 'w') as target:
+                for line in outlines:
+                    target.write(line)
+
+            # run simulation in NONMEM
+            run_model('data_sim.ctl', 'data_sim.out')
+
+            # clean the data for future use
+            data_name = 'data_sim.csv'
+            data = pd.read_csv(data_name, delim_whitespace=True, skiprows=1)
+            temp_data = data.copy()
+            temp_data = temp_data.rename(columns={'ID': 'CID'})
+            temp_data.to_csv('data_sim.csv', index=False)
+###############################################################################
+            os.chdir(current_path)
+            data = pd.read_csv('data_sim.csv')
+            nobs = num_obs(data)
+            id_num = max(data.CID)
+            print 'Sample size is', id_num
+
+            # run the base model for the simulated dataset
+            if sparsity.endswith('Corr'):
+                shutil.copy('base_model_Corr.ctl', 'base_model.ctl')
+            base_script = 'base_model.ctl'
+            base_out_file = 'base_model.out'
+            base_result_file = 'base_model.ext'
+            run_model(base_script, base_out_file)
+            out = read_result_file(base_result_file)
+            base_converge = (-1000000001 in out.ITERATION.values)
+            if not base_converge:
+                continue
+
+            # create a full model with all covariates script for NONMEM
+            full_script = 'full_script_0.ctl'
+            foce_script = "foce_script.ctl"
+            full_result_path, full_cov_file, full_result_file, insert_variables =\
+                full_model(base_script, full_script, data, covariates, IMPMAP=True)
+
+            # run the full model and extract the result
+            full_mod_time_0 = time.time()
+            run_model(full_script, full_result_path)
+            final_result_file = sep_ext(full_result_file)
+            theta_num = count_theta(full_script)
+            base_theta_num = count_theta(base_script)
+            thetas = read_theta(final_result_file, base_theta_num, theta_num)
+            cov = read_cov(full_cov_file, base_theta_num, theta_num)
+            full_obj = read_obj(final_result_file)
+            full_mod_time = time.time() - full_mod_time_0
+###############################################################################
+            os.chdir(current_path)
+            cwdir = create_folder(current_path, 'test_wam_%d' % i)
+            file_list = ['nmfe74.bat', 'data_sim.ctl', 'data_sim.csv',
+                         'base_model.ctl', 'base_model.ext',
+                         'foce_script.ctl', 'full_script_0.ctl',
+                         'full_script_0.ext',
+                         'final_full_script_0.ext', 'full_sim_data.csv']
+            for file_ in file_list:
+                shutil.copy(os.path.join(current_path, file_), cwdir)
+            os.chdir(cwdir)
+
+            wam_time_0 = time.time()
+            wam_result = wam(thetas, cov, base_theta_num,
+                             foce_script, final_result_file,
+                             insert_variables, nobs)
+            wam_time = time.time() - wam_time_0 + full_mod_time
+
+            wam_title = [('Rank_Sim', 'Theta Selected', 'SBC_Sim', 'LAMDA_Sim',
+                          'SBC_Real', 'LAMDA_Real', 'Rank_Real')]
+            wam_table = wam_title + wam_result
+            with open('wald_result.csv', 'wb') as csvfile:
+                writer = csv.writer(csvfile)
+                [writer.writerow(r) for r in wam_table]
+            with open('full_model_time.txt', 'w') as target:
+                target.write(str(full_mod_time))
+            with open('wam_time.txt', 'w') as target:
+                target.write('The script take %.4f s.' % wam_time)
+
+            # find the best model
+            wam_result = pd.read_csv('wald_result.csv')
+            best_index = wam_result[wam_result.Rank_Real == 1].loc[:, 'Rank_Sim']
+            best_script = 'best_' + 'wald_script%d.ctl' % (int(best_index)-1)
+            shutil.copy('wald_script%d.ctl' % (int(best_index)-1),
+                        best_script)
+            best_result_out = best_script.replace('ctl', 'out')
+
+            # change the result name
+            outlines = []
+            with open(best_script, 'r') as target:
+                for line in target:
+                    if line.startswith('FILE='):
+                        line = 'FILE=wald_script.csv NOAPPEND NOPRINT\n'
+                    outlines.append(line)
+            with open(best_script, 'w') as target:
+                for line in outlines:
+                    target.write(line)
+
+            # rerun the model and get the IPRED
+            run_model(best_script, best_result_out)
+            data_name = 'wald_script.csv'
+            result_csv = pd.read_csv(data_name, delim_whitespace=True,
+                                     skiprows=1)
+            # result_csv = result_csv[result_csv.ID != 'ID']
+            result_csv.apply(pd.to_numeric, errors='coerce')
+            result_csv = result_csv.convert_objects(convert_numeric=True)
+            result_csv_obs = result_csv[result_csv.EVID < 1]
+            PRED = result_csv_obs['PRED']
+
+            # change the simulation file
+            outlines = []
+            with open('data_sim.ctl', 'r') as target:
+                for line in target:
+                    if line.startswith('$SIMULATION'):
+                        line = '$SIMULATION (12345) ONLYSIMULATION SUBPROBLEM=100\n'
+                    if line.startswith('$TABLE'):
+                        line = line.replace('data_sim', 'data_sim_RMSE')
+                    outlines.append(line)
+            with open('data_sim_RMSE.ctl', 'w') as target:
+                for line in outlines:
+                    target.write(line)
+            # run the simulation file and clean the results
+            run_model('data_sim_RMSE.ctl', 'data_sim_RMSE.out')
+            data_name = 'data_sim_RMSE.csv'
+            result_csv = pd.read_csv(data_name, delim_whitespace=True, skiprows=1)
+            result_csv = result_csv[result_csv.ID != 'ID']
+            result_csv = result_csv[result_csv.ID != 'TABLE']
+            result_csv.apply(pd.to_numeric, errors='coerce')
+            result_csv = result_csv.convert_objects(convert_numeric=True)
+            result_csv_obs = result_csv[result_csv.EVID < 1]
+            DV = result_csv_obs['DV']
+            DIFF = np.tile(PRED, 100) - DV
+            rmse = RMSE_Value(DIFF)
+            WAM_RMSE.append(rmse)
+###############################################################################
+            quantile_dict = {1: (0.05, 0.05),
+                             2: (0.05, 0.01),
+                             3: (0.01, 0.05),
+                             4: (0.01, 0.01),}
+            for index in quantile_dict:
+                os.chdir(current_path)
+                p_value_1, p_value_2 = quantile_dict[index]
+                # inner elimination significance level
+                quantile_1 = 1 - p_value_1
+                # elimination significance level in NONMEM
+                quantile_2 = 1 - p_value_2
+                cwdir = create_folder(current_path,
+                                      'test_wald_%d_i' % i + str(index))
+                for file_ in file_list:
+                    shutil.copy(os.path.join(current_path, file_), cwdir)
+                os.chdir(cwdir)
+
+                # run wald method with backward elimintation
+                bw_time_0 = time.time()
+                base_script = 'base_model.ctl'
+                bw_list, back_select_set = bw_wald(thetas, cov,
+                                                   full_script, base_script,
+                                                   nobs,
+                                                   insert_variables,
+                                                   cwdir,
+                                                   covariates,
+                                                   data,
+                                                   quantile_2,
+                                                   quantile_1)
+                back_select_set = [("The best set is " + str(back_select_set), )]
+                bw_time = time.time() - bw_time_0 + full_mod_time
+
+                bw_title = [('Variable Deleted', 'LRT')]
+                bw_table = bw_title + bw_list + back_select_set
+                with open('backward_result.csv', 'wb') as csvfile:
+                    writer = csv.writer(csvfile)
+                    [writer.writerow(r) for r in bw_table]
+                with open('wam_be_time.txt', 'w') as target:
+                    target.write('The script take %.4f s.' % bw_time)
+
+                # find the best model
+                for file_ in os.listdir(cwdir):
+                    if file_.startswith('best_bw_') and file_.endswith('.ctl'):
+                        best_script = file_
+                        best_result_out = best_script.replace('ctl', 'out')
+
+                # change the result name
+                outlines = []
+                with open(best_script, 'r') as target:
+                    for line in target:
+                        if line.startswith('FILE='):
+                            line = 'FILE=wambe.csv NOAPPEND NOPRINT\n'
+                        outlines.append(line)
+                with open(best_script, 'w') as target:
+                    for line in outlines:
+                        target.write(line)
+
+                # rerun the model and get the IPRED
+                run_model(best_script, best_result_out)
+                data_name = 'wambe.csv'
+                result_csv = pd.read_csv(data_name, delim_whitespace=True,
+                                         skiprows=1)
+                # result_csv = result_csv[result_csv.ID != 'ID']
+                result_csv.apply(pd.to_numeric, errors='coerce')
+                result_csv = result_csv.convert_objects(convert_numeric=True)
+                result_csv_obs = result_csv[result_csv.EVID < 1]
+                PRED = result_csv_obs['PRED']
+                DIFF = np.tile(PRED, 100) - DV
+                rmse = RMSE_Value(DIFF)
+                WAMBE_RMSE.append(rmse)
+###############################################################################
+            quantile_dict = {0.95: '005',
+                             0.99: '001'}
+            for quantile in quantile_dict:
+                p_value = quantile_dict[quantile]
+                # create folder for stepwise method
+                os.chdir(current_path)
+                cwdir = create_folder(current_path, 'test_sw_%d_' % i + p_value)
+                for file_ in file_list:
+                    shutil.copy(os.path.join(current_path, file_), cwdir)
+                os.chdir(cwdir)
+
+                start_time = time.time()
+                final_script, final_result_file = \
+                    covariate_model_step(foce_script, base_script,
+                                         cwdir, insert_variables,
+                                         data, nobs,
+                                         covariates,
+                                         quantile, out_quantile=0.99)
+                end_time = time.time()
+                run_time = end_time - start_time
+                with open('sw_set.txt', 'a') as target:
+                    target.write('The script take %.4f s.' % run_time)
+
+                # find the best model
+                for file_ in os.listdir(cwdir):
+                    if file_.startswith('best_sw_') and file_.endswith('.ctl'):
+                        best_script = file_
+                        best_result_out = best_script.replace('ctl', 'out')
+
+                # change the result name
+                outlines = []
+                with open(best_script, 'r') as target:
+                    for line in target:
+                        if line.startswith('FILE='):
+                            line = 'FILE=sw.csv NOAPPEND NOPRINT\n'
+                        outlines.append(line)
+                with open(best_script, 'w') as target:
+                    for line in outlines:
+                        target.write(line)
+
+                # rerun the model and get the IPRED
+                run_model(best_script, best_result_out)
+                data_name = 'sw.csv'
+                result_csv = pd.read_csv(data_name, delim_whitespace=True,
+                                         skiprows=1)
+                # result_csv = result_csv[result_csv.ID != 'ID']
+                result_csv.apply(pd.to_numeric, errors='coerce')
+                result_csv = result_csv.convert_objects(convert_numeric=True)
+                result_csv_obs = result_csv[result_csv.EVID < 1]
+                PRED = result_csv_obs['PRED']
+                DIFF = np.tile(PRED, 100) - DV
+                rmse = RMSE_Value(DIFF)
+                SW_RMSE.append(rmse)
+###############################################################################
+            i += 1
+        except:
+            print 'There is an error.'
+            # continue
+
+    WAMBE1_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 0]
+    WAMBE2_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 1]
+    WAMBE3_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 2]
+    WAMBE4_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 3]
+    SW_1_RMSE = [SW_RMSE[index]
+        for index in range(len(SW_RMSE)) if index % 2 == 0]
+    SW_2_RMSE = [SW_RMSE[index]
+        for index in range(len(SW_RMSE)) if index % 2 == 1]
+
+    df = pd.DataFrame(data = [SW_1_RMSE, SW_2_RMSE, WAM_RMSE,
+                              WAMBE1_RMSE, WAMBE2_RMSE, WAMBE3_RMSE,
+                              WAMBE4_RMSE])
+    df = df.transpose()
+    df.columns = ['SCM1', 'SCM2', 'WAM', 'M1', 'M2', 'M3', 'M4']
+    os.chdir(current_path)
+    df.to_csv(current_path + '\\one_comp_RMSE_%s.csv' % sample_size, index=False)
+
+def run_rituximab(num_sim, home_dir):
+    covariates = {'AGE': 'continuous variable',
+              'SEX': 'factor',
+              'BSA': 'continuous variable',
+              'ALT': 'continuous variable',
+              'ALP': 'continuous variable',
+              'AST': 'continuous variable',
+              'ALB': 'continuous variable',
+              'TB': 'continuous variable',
+              'HCT': 'continuous variable',
+              'PC': 'continuous variable',
+              'LDH':'continuous variable',
+              'SCR': 'continuous variable'}
+    # select_0 = [11, 16, 24, 29]
+    WAM_RMSE = []
+    WAMBE_RMSE = []
+    SW_RMSE = []
+    # specify the simulation times
+    i = 0
+    while i < num_sim:
+        try:
+            # create a new folder for wald method
+            # change to current work directory
+            print 'Begin Simulation %d!.' % i
+            project_path = home_dir + '\\Rituximab'
+            os.chdir(project_path)
+
+            current_path = create_folder(project_path, 'Simulation')
+            file_list = ['nmfe74.bat', 'data_sim_0.ctl',
+                         'base_model.ctl', 'pat_sim_data.csv',
+                         'rituximab.csv']
+            for file_ in file_list:
+                shutil.copy(os.path.join(project_path, file_), current_path)
+            os.chdir(current_path)
+
+            # create NONMEM dataset
+            create_NONMEM_data_2('pat_sim_data.csv')
+
+            # run simulation in NONMEM to simulate data_sim.csv
+            # using the previous template rituxan.csv
+            # reset the random seed in NONMEM simulation file
+            outlines = []
+            with open('data_sim_0.ctl', 'r') as target:
+                for line in target:
+                    if line.startswith('$SIMULATION'):
+                        line = '$SIMULATION (123456%d) ONLYSIMULATION SUBPROBLEM=1\n' % i
+                    outlines.append(line)
+
+            with open('data_sim.ctl', 'w') as target:
+                for line in outlines:
+                    target.write(line)
+
+            run_model('data_sim.ctl', 'data_sim.out')
+
+            # clean data_sim.csv
+            data_name = 'data_sim.csv'
+            data = pd.read_csv(data_name, delim_whitespace=True, skiprows=1)
+            temp_data = data.copy()
+            temp_data = temp_data.rename(columns={'ID': 'CID'})
+            temp_data.to_csv('data_sim.csv', index=False)
+            os.chdir(current_path)
+            data = pd.read_csv('data_sim.csv')
+            nobs = num_obs(data)
+
+            # run the base model for the simulated dataset
+            base_script = 'base_model.ctl'
+            base_out_file = 'base_model.out'
+            base_result_file = 'base_model.ext'
+            run_model(base_script, base_out_file)
+            out = read_result_file(base_result_file)
+            base_converge = (-1000000001 in out.ITERATION.values)
+            if not base_converge:
+                continue
+
+            # create a full model with all covariates script for NONMEM
+            full_script = 'full_script_0.ctl'
+            foce_script = "foce_script.ctl"
+            full_result_path, full_cov_file, full_result_file, insert_variables =\
+                full_model(base_script, full_script, data, covariates, IMPMAP=True)
+
+            # run the full model and extract the result
+            full_mod_time_0 = time.time()
+            run_model(full_script, full_result_path)
+            final_result_file = sep_ext(full_result_file)
+            theta_num = count_theta(full_script)
+            base_theta_num = count_theta(base_script)
+            thetas = read_theta(final_result_file, base_theta_num, theta_num)
+            cov = read_cov(full_cov_file, base_theta_num, theta_num)
+            full_obj = read_obj(final_result_file)
+            full_mod_time = time.time() - full_mod_time_0
+###############################################################################
+            os.chdir(current_path)
+            cwdir = create_folder(current_path, 'test_wam_%d' % i)
+            file_list = ['nmfe74.bat', 'data_sim.ctl', 'data_sim.csv',
+                         'base_model.ctl', 'base_model.ext',
+                         'foce_script.ctl', 'full_script_0.ctl',
+                         'full_script_0.ext', 'full_sim_data.csv',
+                         'final_full_script_0.ext']
+            for file_ in file_list:
+                shutil.copy(os.path.join(current_path, file_), cwdir)
+            os.chdir(cwdir)
+
+            wam_time_0 = time.time()
+            wam_result = wam(thetas, cov, base_theta_num,
+                             foce_script, final_result_file,
+                             insert_variables, nobs)
+            wam_time = time.time() - wam_time_0 + full_mod_time
+
+            wam_title = [('Rank_Sim', 'Theta Selected', 'SBC_Sim', 'LAMDA_Sim',
+                          'SBC_Real', 'LAMDA_Real', 'Rank_Real')]
+            wam_table = wam_title + wam_result
+            with open('wald_result.csv', 'wb') as csvfile:
+                writer = csv.writer(csvfile)
+                [writer.writerow(r) for r in wam_table]
+            with open('full_model_time.txt', 'w') as target:
+                target.write(str(full_mod_time))
+            with open('wam_time.txt', 'w') as target:
+                target.write('The script take %.4f s.' % wam_time)
+
+            # find the best model
+            wam_result = pd.read_csv('wald_result.csv')
+            best_index = wam_result[wam_result.Rank_Real == 1].loc[:, 'Rank_Sim']
+            best_script = 'best_' + 'wald_script%d.ctl' % (int(best_index)-1)
+            shutil.copy('wald_script%d.ctl' % (int(best_index)-1),
+                        best_script)
+            best_result_out = best_script.replace('ctl', 'out')
+
+            # change the result name
+            outlines = []
+            with open(best_script, 'r') as target:
+                for line in target:
+                    if line.startswith('FILE='):
+                        line = 'FILE=wald_script.csv NOAPPEND NOPRINT\n'
+                    outlines.append(line)
+            with open(best_script, 'w') as target:
+                for line in outlines:
+                    target.write(line)
+
+            # rerun the model and get the IPRED
+            run_model(best_script, best_result_out)
+            data_name = 'wald_script.csv'
+            result_csv = pd.read_csv(data_name, delim_whitespace=True,
+                                     skiprows=1)
+            # result_csv = result_csv[result_csv.ID != 'ID']
+            result_csv.apply(pd.to_numeric, errors='coerce')
+            result_csv = result_csv.convert_objects(convert_numeric=True)
+            result_csv_obs = result_csv[result_csv.EVID < 1]
+            PRED = result_csv_obs['PRED']
+
+            # change the simulation file
+            outlines = []
+            with open('data_sim.ctl', 'r') as target:
+                for line in target:
+                    if line.startswith('$SIMULATION'):
+                        line = '$SIMULATION (12345) ONLYSIMULATION SUBPROBLEM=100\n'
+                    if line.startswith('$TABLE'):
+                        line = line.replace('data_sim', 'data_sim_RMSE')
+                    outlines.append(line)
+            with open('data_sim_RMSE.ctl', 'w') as target:
+                for line in outlines:
+                    target.write(line)
+            # run the simulation file and clean the results
+            run_model('data_sim_RMSE.ctl', 'data_sim_RMSE.out')
+            data_name = 'data_sim_RMSE.csv'
+            result_csv = pd.read_csv(data_name, delim_whitespace=True, skiprows=1)
+            result_csv = result_csv[result_csv.ID != 'ID']
+            result_csv = result_csv[result_csv.ID != 'TABLE']
+            result_csv.apply(pd.to_numeric, errors='coerce')
+            result_csv = result_csv.convert_objects(convert_numeric=True)
+            result_csv_obs = result_csv[result_csv.EVID < 1]
+            DV = result_csv_obs['DV']
+            DIFF = np.tile(PRED, 100) - DV
+            rmse = RMSE_Value(DIFF)
+            WAM_RMSE.append(rmse)
+###############################################################################
+            quantile_dict = {1: (0.05, 0.05),
+                             2: (0.05, 0.01),
+                             3: (0.01, 0.05),
+                             4: (0.01, 0.01)}
+            for index in quantile_dict:
+                os.chdir(current_path)
+                p_value_1, p_value_2 = quantile_dict[index]
+                # inner elimination significance level
+                quantile_1 = 1 - p_value_1
+                # elimination significance level in NONMEM
+                quantile_2 = 1 - p_value_2
+                cwdir = create_folder(current_path, 'test_wald_%d_i' % i + str(index))
+                for file_ in file_list:
+                    shutil.copy(os.path.join(current_path, file_), cwdir)
+                os.chdir(cwdir)
+
+                # run wald method with backward elimintation
+                bw_time_0 = time.time()
+                base_script = 'base_model.ctl'
+                bw_list, back_select_set = bw_wald(thetas, cov,
+                                                   full_script, base_script,
+                                                   nobs,
+                                                   insert_variables,
+                                                   cwdir,
+                                                   covariates,
+                                                   data,
+                                                   quantile_2,
+                                                   quantile_1)
+                back_select_set = [("The best set is " + str(back_select_set), )]
+                bw_time = time.time() - bw_time_0 + full_mod_time
+
+                bw_title = [('Variable Deleted', 'LRT')]
+                bw_table = bw_title + bw_list + back_select_set
+                with open('backward_result.csv', 'wb') as csvfile:
+                    writer = csv.writer(csvfile)
+                    [writer.writerow(r) for r in bw_table]
+                with open('wam_be_time.txt', 'w') as target:
+                    target.write('The script take %.4f s.' % bw_time)
+                # find the best model
+                for file_ in os.listdir(cwdir):
+                    if file_.startswith('best_bw_') and file_.endswith('.ctl'):
+                        best_script = file_
+                        best_result_out = best_script.replace('ctl', 'out')
+
+                # change the result name
+                outlines = []
+                with open(best_script, 'r') as target:
+                    for line in target:
+                        if line.startswith('FILE='):
+                            line = 'FILE=wambe.csv NOAPPEND NOPRINT\n'
+                        outlines.append(line)
+                with open(best_script, 'w') as target:
+                    for line in outlines:
+                        target.write(line)
+
+                # rerun the model and get the IPRED
+                run_model(best_script, best_result_out)
+                data_name = 'wambe.csv'
+                result_csv = pd.read_csv(data_name, delim_whitespace=True,
+                                         skiprows=1)
+                # result_csv = result_csv[result_csv.ID != 'ID']
+                result_csv.apply(pd.to_numeric, errors='coerce')
+                result_csv = result_csv.convert_objects(convert_numeric=True)
+                result_csv_obs = result_csv[result_csv.EVID < 1]
+                PRED = result_csv_obs['PRED']
+                DIFF = np.tile(PRED, 100) - DV
+                rmse = RMSE_Value(DIFF)
+                WAMBE_RMSE.append(rmse)
+###############################################################################
+            quantile_dict = {0.95: '005',
+                             0.99: '001'}
+            for quantile in quantile_dict:
+                p_value = quantile_dict[quantile]
+                # create folder for stepwise method
+                os.chdir(current_path)
+                cwdir = create_folder(current_path, 'test_sw_%d_' % i + p_value)
+                for file_ in file_list:
+                    shutil.copy(os.path.join(current_path, file_), cwdir)
+                os.chdir(cwdir)
+
+                start_time = time.time()
+                final_script, final_result_file = \
+                    covariate_model_step(foce_script, base_script,
+                                         cwdir, insert_variables,
+                                         data, nobs,
+                                         covariates,
+                                         quantile, out_quantile=0.99)
+                end_time = time.time()
+                run_time = end_time - start_time
+                with open('sw_set.txt', 'a') as target:
+                    target.write('The script take %.4f s.' % run_time)
+                # find the best model
+                for file_ in os.listdir(cwdir):
+                    if file_.startswith('best_sw_') and file_.endswith('.ctl'):
+                        best_script = file_
+                        best_result_out = best_script.replace('ctl', 'out')
+
+                # change the result name
+                outlines = []
+                with open(best_script, 'r') as target:
+                    for line in target:
+                        if line.startswith('FILE='):
+                            line = 'FILE=sw.csv NOAPPEND NOPRINT\n'
+                        outlines.append(line)
+                with open(best_script, 'w') as target:
+                    for line in outlines:
+                        target.write(line)
+
+                # rerun the model and get the IPRED
+                run_model(best_script, best_result_out)
+                data_name = 'sw.csv'
+                result_csv = pd.read_csv(data_name, delim_whitespace=True,
+                                         skiprows=1)
+                # result_csv = result_csv[result_csv.ID != 'ID']
+                result_csv.apply(pd.to_numeric, errors='coerce')
+                result_csv = result_csv.convert_objects(convert_numeric=True)
+                result_csv_obs = result_csv[result_csv.EVID < 1]
+                PRED = result_csv_obs['PRED']
+                DIFF = np.tile(PRED, 100) - DV
+                rmse = RMSE_Value(DIFF)
+                SW_RMSE.append(rmse)
+            i += 1
+        except:
+            continue
+
+    WAMBE1_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 0]
+    WAMBE2_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 1]
+    WAMBE3_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 2]
+    WAMBE4_RMSE = [WAMBE_RMSE[index]
+        for index in range(len(WAMBE_RMSE)) if index % 4 == 3]
+    SW_1_RMSE = [SW_RMSE[index]
+        for index in range(len(SW_RMSE)) if index % 2 == 0]
+    SW_2_RMSE = [SW_RMSE[index]
+        for index in range(len(SW_RMSE)) if index % 2 == 1]
+
+    df = pd.DataFrame(data = [SW_1_RMSE, SW_2_RMSE, WAM_RMSE,
+                              WAMBE1_RMSE, WAMBE2_RMSE, WAMBE3_RMSE,
+                              WAMBE4_RMSE])
+    df = df.transpose()
+    df.columns = ['SCM1', 'SCM2', 'WAM', 'M1', 'M2', 'M3', 'M4']
+    os.chdir(current_path)
+    df.to_csv(current_path + '\\rituximab_RMSE.csv', index=False)
